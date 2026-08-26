@@ -6,8 +6,14 @@ secret/
 # Plex). reference/plex_curl.txt briefly had a live plex-auth-prod/-test
 # cookie committed to this repo before this rule existed - see git history
 # and rotate that session if you haven't already.
-*_curl.txt
-reference/plex_curl.txt
+#
+# Broad glob deliberately, not just plex_curl.txt: the pattern is a numbered
+# series (plex_curl_2.txt already exists) and *_curl.txt alone does not match
+# a numbered filename like that - it only matches names ending literally in
+# "_curl.txt".
+*curl*.txt
+*curl*.json
+*.har
 
 # Historical status logs from the legacy poller.
 # ~500MB and growing by one ~2MB file per day; this is generated data, not source.

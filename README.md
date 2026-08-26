@@ -235,6 +235,32 @@ temperatures come from `OVEN_AUX_THERMOCOUPLE`'s eleven probes; and several
 permissive/limit booleans appear to be wired normally-closed, so their names read
 backwards.
 
+## Plex integration (client module only, not yet wired in)
+
+`collector/plex_login.py` + `collector/plex.py` are a reusable client for pulling real
+production context (job/part/serial numbers, actual cycle temperature and timing) from
+Plex Cloud to eventually show alongside PLC-derived oven state - ported from the
+sibling "Fetch Log Data" project's own `login.py`/`plex.py`, which already does this
+against the same Plex tenant.
+
+    from collector import plex
+    loads = plex.get_furnace_loads(workcenter_key="58085",
+                                    begin_date="2026-08-25T05:00:00.000Z",
+                                    end_date="2026-08-27T05:00:00.000Z")
+    serial = loads[0]["ContainersData"][0]["SerialNo"]
+    container = plex.get_container(serial, start_date="...", end_date="...")
+
+Requires `secret/plex_login_infos.txt` (`username=`/`password=`/`company_code=`) before
+first use. `secret/plex_infos.txt` (the live session) is created automatically on first
+use, or bootstrap it by hand with `python -m collector.plex_login`. Both files are
+covered by the `secret/` gitignore rule.
+
+Deliberately **not** wired into the poll loop, storage schema, or the dashboard yet -
+this is just the callable client. `WorkcenterKey "58085"` is confirmed as
+`PAD-Small Aging Oven`; a fuller integration (a scheduled sync writing job/part
+context alongside PLC samples, surfaced on the dashboard) is a natural next step but
+not built yet.
+
 ## Conventions
 
 - Local secrets live in `secret/*.txt` (gitignored), matching sibling projects.
