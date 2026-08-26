@@ -22,7 +22,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$SERVICE_NAMES = @('OvenCollector')
+$SERVICE_NAMES = @('OvenCollector', 'OvenPublisher')
 $nssm = Join-Path $InstallRoot 'bin\nssm.exe'
 
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()

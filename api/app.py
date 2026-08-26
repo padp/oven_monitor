@@ -8,6 +8,8 @@ dashboard is useful now rather than after the whole cloud pipeline lands.
 Read-only on purpose: there is no /ingest here yet, because nothing
 publishes yet. Adding one later does not change any endpoint below.
 """
+import os
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
@@ -29,10 +31,64 @@ except ImportError:
 app = Flask(__name__)
 CORS(app)
 
+# Tables the publisher is allowed to write. An explicit allowlist rather
+# than trusting the request body's keys, so a malformed or hostile payload
+# cannot create arbitrary collections.
+INGESTABLE = ("samples", "state_events")
+
+if os.environ.get("SQL_PASS"):
+    # Skipped when SQL_PASS is not set (local SQLite mode, or Render's build
+    # step). At import time so it also runs under gunicorn, not just
+    # `python run_api.py`.
+    from .db import ensure_indexes
+    ensure_indexes()
+
+
+def _require_api_key():
+    expected = os.environ.get("INGEST_API_KEY")
+    if not expected:
+        return False
+    return request.headers.get("X-Api-Key") == expected
+
 
 @app.route("/api/health")
 def health():
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "backend": store.backend_name()})
+
+
+@app.post("/ingest")
+def ingest():
+    """Accept a batch of collector rows from the publisher.
+
+    Upserts by source_id so re-delivery is harmless - the publisher only
+    advances its checkpoint after a confirmed 200, which means a POST that
+    succeeds server-side but fails in transit gets sent again.
+    """
+    if not _require_api_key():
+        return jsonify(error="unauthorized"), 401
+
+    from pymongo import UpdateOne
+    from .db import get_db
+
+    body = request.get_json(force=True, silent=True) or {}
+    db = get_db()
+    counts = {}
+
+    for table_name in INGESTABLE:
+        rows = body.get(table_name) or []
+        usable = [r for r in rows if isinstance(r, dict) and r.get("source_id")]
+        if usable:
+            db[table_name].bulk_write(
+                [UpdateOne({"source_id": r["source_id"]}, {"$set": r}, upsert=True)
+                 for r in usable],
+                ordered=False,
+            )
+        counts[table_name] = len(usable)
+        if len(usable) != len(rows):
+            # Silently dropping rows would look like data loss later; say so.
+            counts[table_name + "_skipped_no_source_id"] = len(rows) - len(usable)
+
+    return jsonify(ok=True, counts=counts)
 
 
 @app.route("/api/ovens")

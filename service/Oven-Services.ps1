@@ -22,7 +22,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$SERVICE_NAMES = @('OvenCollector')
+$SERVICE_NAMES = @('OvenCollector', 'OvenPublisher')
 $logDir = Join-Path $InstallRoot 'logs'
 $dbPath = Join-Path $InstallRoot 'db\oven_monitor.db'
 

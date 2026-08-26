@@ -1,11 +1,13 @@
 /* Oven Monitor dashboard.
  *
- * Talks to api/app.py. There is no deployed API yet, so the base URL
- * defaults to localhost and can be overridden with ?api=<url> (remembered
- * in localStorage). When the Render service exists, change API_DEFAULT.
+ * Talks to api/app.py, deployed on Render per the naming convention
+ * mirroring granco_monitor's granco-monitor.onrender.com. If the Render
+ * service ends up with a different name, update API_DEFAULT to match -
+ * or just open this page with ?api=<actual-url> once, which remembers it
+ * in localStorage from then on.
  */
 
-const API_DEFAULT = "http://localhost:8000";
+const API_DEFAULT = "https://oven-monitor.onrender.com";
 const REFRESH_MS = 5000;
 
 function apiBase() {

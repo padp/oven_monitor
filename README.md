@@ -87,19 +87,26 @@ mid-write, where the legacy poller died partway through the day. A strict JSON p
 rejects the whole file, though the records before the break are recoverable. This is a
 direct argument for the new collector's row-at-a-time SQLite commits.
 
-## API and dashboard
+## Pipeline
 
-    python -m api.app                      # read-only HTTP API on :8000
+Mirrors granco_monitor's shape end to end: `collector` writes local SQLite,
+`publisher` forwards new rows to a cloud API, `api` (Flask + MongoDB Atlas, on
+Render) is the single source of truth, `docs` is a static dashboard reading
+from it. Every module also has a local-only path, so each piece is testable
+without the others already deployed - see below.
+
+    collector/  ->  db/oven_monitor.db  ->  publisher/  ->  api/ (Render)  ->  docs/
+
+`api/store.py` picks its backend (`store_sqlite` locally, `store_mongo` when
+`SQL_PASS` is set) so `api/app.py` never learns which is in play - the same
+four functions, the same shapes, either way.
+
+### Running locally (no cloud needed)
+
+    python -m api.app                      # read-only HTTP API on :8000, SQLite-backed
     cd docs && python -m http.server 8781  # dashboard
 
 Then open `http://localhost:8781/index.html?api=http://localhost:8000`.
-
-`api/` mirrors granco_monitor's shape and will mirror its deployment (Flask on Render,
-MongoDB Atlas) once `publisher/` exists. Until then it reads the collector's SQLite
-directly via `api/store.py`, so the dashboard is useful now rather than after the whole
-cloud pipeline lands. Swapping the backing store later means reimplementing `store.py`
-and nothing else - `api/app.py` never sees SQL. There is no `/ingest` yet because
-nothing publishes yet.
 
 The dashboard is a **tag monitor**: every canonical field with the PLC tag it came from
 and its raw value, grouped and filterable. Above it sits a "Needs attention" panel that
@@ -112,17 +119,49 @@ says. The 24h panel deliberately says "share of observed time" rather than uptim
 the collector has not run long enough, and no full cycle has been watched yet, for a
 percentage to mean more than that.
 
-## Running it for real
+### Deploying the cloud API (one-time, manual)
 
-The collector runs as a Windows service on the same host as the legacy poller. See
-[`service/README.md`](service/README.md):
+1. On Render, create a new Web Service from this repo. Build command: none needed
+   (pip installs via `api/requirements.txt` is Render's default for Python).
+   Start command is already in `Procfile`.
+2. Set env vars: `SQL_PASS` (the Atlas cluster password) and `INGEST_API_KEY`
+   (any random string - the publisher must send the same value).
+3. Confirm `https://oven-monitor.onrender.com/api/health` returns
+   `{"ok": true, "backend": "mongo"}`. If Render assigns a different hostname,
+   update `API_DEFAULT` in `docs/app.js`.
+4. On the poller host, create `secret/oven_publisher.txt`:
+
+       API_URL=https://oven-monitor.onrender.com
+       API_KEY=<same value as INGEST_API_KEY>
+
+5. `docs/` deploys to GitHub Pages the same way granco_monitor's does (repo
+   Settings -> Pages -> serve from `/docs` on `main`).
+
+### Running it for real
+
+Both the collector and the publisher run as Windows services on the same host as the
+legacy poller. See [`service/README.md`](service/README.md):
 
     .\Install-OvenServices.ps1 -ServiceAccount 'DOMAIN\svc_oven'
     .\Oven-Services.ps1 status
 
+The installer's preflight step runs both entry points with `--check` before touching
+the service layer at all, so a missing `secret/oven_publisher.txt` or an import problem
+surfaces as a clear message rather than a service that starts and immediately dies.
+
 The database is kept on **local disk** (`OVEN_DB_DIR`), not the share - SQLite's
 locking needs file-lock primitives SMB only partially emulates. A useful consequence
 is that the service account needs only READ on the share.
+
+### /ingest and idempotency
+
+`state_events` rows are mutated after insert - `ts_end` fills in once a segment closes -
+which a plain "id > last synced" sweep would miss: it would publish the open segment
+once with `ts_end: null` and never correct it. The publisher instead re-sends any
+still-open segment every tick and only advances its checkpoint past the oldest
+currently-open one. `/ingest` upserts everything by `source_id` (`oven_id:timestamp`,
+not the local SQLite row id - stable across a rebuilt local database), so re-delivery
+of an already-synced row is harmless.
 
 ## Oven state model
 

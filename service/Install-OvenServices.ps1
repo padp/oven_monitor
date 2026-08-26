@@ -97,6 +97,12 @@ $SERVICES = @(
         Display = 'Oven Monitor - PLC Collector'
         Desc    = 'Polls the aging oven PLCs and records samples to oven_monitor.db.'
     }
+    [pscustomobject]@{
+        Name    = 'OvenPublisher'
+        Script  = 'run_publisher.py'
+        Display = 'Oven Monitor - API Publisher'
+        Desc    = 'Pushes new collector rows from the local SQLite DB up to the cloud API.'
+    }
 )
 
 # --- Helpers ----------------------------------------------------------------
@@ -418,6 +424,36 @@ if (-not $SkipPrereqs) {
     if ($sysPy) { $pyExe = $sysPy }
     if (-not (Test-Path $pyExe))          { throw "-SkipPrereqs given but Python missing: $pyExe" }
     if (-not (Test-Path $script:NssmExe)) { throw "-SkipPrereqs given but nssm missing: $script:NssmExe" }
+}
+
+# --- Preflight: does the code actually import? -------------------------------
+# Both entry points support --check: import everything, touch nothing, print
+# what they resolved (DB paths, enabled ovens, API credentials). Catching an
+# import problem here means a clear message now instead of a service that
+# starts and immediately dies with the real cause buried in a log file.
+
+Write-Step "Verifying the code runs under $(Split-Path -Leaf $pyExe)"
+Push-Location $ProjectPath
+try {
+    foreach ($svc in $SERVICES) {
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { $out = & $pyExe -u $svc.Script --check 2>&1 } finally { $ErrorActionPreference = $prevEap }
+        $text = ($out | ForEach-Object { "$_" }) -join "`n"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn2 "$($svc.Script) --check failed (exit $LASTEXITCODE):"
+            $text -split "`n" | ForEach-Object { Write-Info "  $_" }
+            if ($svc.Name -eq 'OvenPublisher' -and $text -match 'NOT CONFIGURED') {
+                throw ("$($svc.Script) has no cloud API credentials yet. Create " +
+                       "secret\oven_publisher.txt (see service\README.md), then re-run.")
+            }
+            throw "$($svc.Script) cannot run under $pyExe. Fix this before installing the service."
+        }
+        Write-Ok "$($svc.Script)"
+        $text -split "`n" | Where-Object { $_ } | ForEach-Object { Write-Info "  $_" }
+    }
+} finally {
+    Pop-Location
 }
 
 # --- Permissions ------------------------------------------------------------
