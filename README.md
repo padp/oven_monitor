@@ -139,19 +139,35 @@ percentage to mean more than that.
 
 ### Running it for real
 
-Both the collector and the publisher run as Windows services on the same host as the
-legacy poller. See [`service/README.md`](service/README.md):
+Both `run_collector.py` and `run_publisher.py` run persistently on the same host as
+the legacy poller, via **Windows Task Scheduler** - not as Windows services. Each is
+a scheduled task running `python.exe run_collector.py` / `python.exe run_publisher.py`
+with the working directory set to the project root, triggered at startup (and/or on a
+"repeat indefinitely" schedule), with "if the task is already running, do not start a
+new instance" set so a slow-to-exit previous run is never doubled up.
 
-    .\Install-OvenServices.ps1 -ServiceAccount 'DOMAIN\svc_oven'
-    .\Oven-Services.ps1 status
+Before wiring either up as a scheduled task, run its `--check` flag by hand once -
+imports everything, touches nothing, and prints what it resolved (DB path, enabled
+ovens, and for the publisher, whether `secret/oven_publisher.txt` is present and
+valid):
 
-The installer's preflight step runs both entry points with `--check` before touching
-the service layer at all, so a missing `secret/oven_publisher.txt` or an import problem
-surfaces as a clear message rather than a service that starts and immediately dies.
+    python run_collector.py --check
+    python run_publisher.py --check
 
-The database is kept on **local disk** (`OVEN_DB_DIR`), not the share - SQLite's
-locking needs file-lock primitives SMB only partially emulates. A useful consequence
-is that the service account needs only READ on the share.
+This is the same check the (unused) `service/` installer runs automatically -
+catching a bad import or missing credentials this way is a lot faster than watching a
+scheduled task fail silently and digging through Task Scheduler's history to find out
+why.
+
+The database should live on **local disk**, not the share - SQLite's locking needs
+file-lock primitives SMB only partially emulates. Set `OVEN_DB_DIR` in the scheduled
+task's environment (or in the task's action, e.g. `cmd /c "set OVEN_DB_DIR=C:\Oven\db && python run_collector.py"`)
+to a local path.
+
+`service/` (NSSM-based Windows services, mirroring granco_monitor's approach) is kept
+in the repo but **not used** for this project - Task Scheduler is the actual
+deployment method. See [`service/README.md`](service/README.md) only if that ever
+needs to change.
 
 ### /ingest and idempotency
 

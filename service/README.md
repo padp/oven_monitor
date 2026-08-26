@@ -1,5 +1,11 @@
 # Running the collector and publisher as Windows services
 
+> **Not currently used.** This project actually runs `run_collector.py` and
+> `run_publisher.py` via Windows Task Scheduler - see the "Running it for real"
+> section in the top-level [README.md](../README.md). These scripts are kept here,
+> tested and working, as an alternative in case Task Scheduler ever stops being the
+> right fit; they are not part of the current deployment.
+
 Run these **on the same host that already runs `large_oven_status.py`**, from an
 elevated PowerShell. Two services are installed:
 
