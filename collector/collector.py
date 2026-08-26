@@ -9,10 +9,26 @@ alongside the small one.
 import time
 from datetime import datetime
 
-from . import config
-from .detector import Detector
-from .plc_client import PlcClient
-from .storage import Storage, summarize_load_temps
+try:
+    from . import config
+    from .detector import Detector
+    from .plc_client import PlcClient
+    from .storage import Storage, summarize_load_temps
+except ImportError:
+    # Running this file directly (python collector\collector.py) breaks the
+    # relative imports above, because the file is then a top-level script
+    # rather than part of the `collector` package. The raw error - "attempted
+    # relative import with no known parent package" - points at the import
+    # line and says nothing about how to fix it, so translate it.
+    if __package__ in (None, ""):
+        raise SystemExit(
+            "collector/collector.py is a package module and cannot be run directly.\n"
+            "Run it from the project root instead:\n"
+            "    python run_collector.py\n"
+            "or, equivalently:\n"
+            "    python -m collector.collector"
+        )
+    raise
 
 
 class OvenPoller:
