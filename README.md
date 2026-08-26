@@ -41,6 +41,52 @@ Each snapshot looks like:
 }
 ```
 
+## New collector
+
+`python run_collector.py` polls every oven marked `enabled` in
+`collector/config.py` and writes to SQLite (`db/oven_monitor.db`).
+
+Currently **only the small oven is enabled**, to establish its pattern before the
+large oven is switched over. The large oven stays covered by the legacy poller in the
+meantime, so nothing is unmonitored.
+
+    collector/config.py      oven registry + per-oven tag maps
+    collector/plc_client.py  thin pylogix wrapper, one socket per oven
+    collector/detector.py    RUNNING / IDLE / FAULT / UNKNOWN
+    collector/storage.py     SQLite: samples + state_events
+
+Both ovens map their own PLC tag names onto one set of **canonical field names**, so
+the detector and storage never learn that the two ovens name things differently.
+Every row carries `oven_id`; enabling the large oven is a config change, not a schema
+change.
+
+Set `OVEN_DB_DIR` to keep the SQLite file off the network share - SMB only partially
+emulates the file-lock primitives SQLite needs.
+
+### Everything is stored raw
+
+Samples record what the PLC actually reported - no polarity correction, no substituting
+"sensible" values. Interpretation happens at read time. This matters because two
+things about the small oven are still unsettled (bit polarity, and the exact shape of a
+real cycle), and a wrong assumption baked into storage would corrupt the very history
+that would prove it wrong.
+
+The one exception is the load-temperature aggregate, which excludes probes pinned at
+2192 F - that is type J full scale, i.e. "no signal", and averaging it in would drag the
+result up by hundreds of degrees. The raw vector is still stored alongside, and
+`load_temp_valid_count` records how many probes actually contributed.
+
+### Verification
+
+`collector/detector.py` is a port of `large_oven_status.py`'s `determine_state()`.
+Replaying all 293 legacy daily files - **691,379 snapshots** - through the new detector
+reproduces the legacy poller's own recorded state on **100.000%** of them.
+
+Four of those files (2025-10-28, 2026-01-16, 2026-05-08, 2026-07-02) are truncated
+mid-write, where the legacy poller died partway through the day. A strict JSON parse
+rejects the whole file, though the records before the break are recoverable. This is a
+direct argument for the new collector's row-at-a-time SQLite commits.
+
 ## Oven state model
 
 `OvenState` is RUNNING / IDLE / FAULT / UNKNOWN. `determine_state()` in

@@ -1,0 +1,211 @@
+"""SQLite schema and storage helpers for the oven monitor.
+
+Two tables, both keyed by oven_id so a second oven is a config change
+rather than a schema change:
+
+  samples       one row per poll per oven - the continuous telemetry
+                record, and the direct successor to the legacy daily
+                Large_Oven_Status_*.json files
+  state_events  RUNNING/IDLE/FAULT/UNKNOWN segments, for uptime reporting
+
+Unlike the saw monitor - where raw polls are a 48h troubleshooting buffer
+and the real record is discrete cut events - an oven has no equivalent
+discrete event. The telemetry IS the record: uptime, cycle behaviour and
+the still-unsettled bit-polarity question are all answered by looking
+back over continuous samples. So `samples` is kept, not pruned, by
+default. At 30s per oven that is ~2900 rows/day, which SQLite does not
+care about.
+
+Every value in `samples` is stored EXACTLY as the PLC reported it. No
+polarity correction, no invalid-value substitution beyond dropping known
+dead thermocouples out of the load aggregates. Interpretation happens at
+read time, so a wrong assumption today cannot corrupt the history that
+would prove it wrong.
+"""
+import json
+import os
+import sqlite3
+from datetime import datetime, timedelta
+
+from . import config
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    oven_id TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    state TEXT,
+    reason TEXT,
+    zone1_temp REAL,
+    zone2_temp REAL,
+    setpoint REAL,
+    zone1_burner REAL,
+    zone2_burner REAL,
+    cycle_time_left_min REAL,
+    exhaust_fan_active REAL,
+    load_temp_min REAL,
+    load_temp_mean REAL,
+    load_temp_max REAL,
+    load_temp_valid_count INTEGER,
+    snapshot_json TEXT NOT NULL,
+    load_temps_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_samples_oven_ts ON samples(oven_id, ts);
+
+CREATE TABLE IF NOT EXISTS state_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    oven_id TEXT NOT NULL,
+    ts_start TEXT NOT NULL,
+    ts_end TEXT,
+    state TEXT NOT NULL,
+    reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_state_events_oven ON state_events(oven_id, ts_start);
+"""
+
+# Canonical fields promoted to real columns because they are what almost
+# every query filters or plots on. Everything else still lands in
+# snapshot_json, so nothing is lost by not being listed here.
+SAMPLE_COLUMNS = [
+    "zone1_temp",
+    "zone2_temp",
+    "setpoint",
+    "zone1_burner",
+    "zone2_burner",
+    "cycle_time_left_min",
+    "exhaust_fan_active",
+]
+
+
+class Storage:
+    def __init__(self, db_path: str = config.DB_PATH):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self._conn = sqlite3.connect(db_path)
+        self._conn.executescript(SCHEMA)
+        self._conn.commit()
+        # Open state segment per oven, so two ovens don't share one.
+        self._open_state = {}
+
+    # --- samples ------------------------------------------------------
+
+    def insert_sample(self, oven_id, ts, snapshot, state, reason, load_temps):
+        """Record one poll. `snapshot` is the full canonical dict."""
+        stats = summarize_load_temps(load_temps)
+        cols = ["oven_id", "ts", "state", "reason"] + SAMPLE_COLUMNS + [
+            "load_temp_min", "load_temp_mean", "load_temp_max",
+            "load_temp_valid_count", "snapshot_json", "load_temps_json",
+        ]
+        values = [oven_id, ts.isoformat(), state, reason]
+        values += [_as_number(snapshot.get(c)) for c in SAMPLE_COLUMNS]
+        values += [
+            stats["min"], stats["mean"], stats["max"], stats["valid_count"],
+            json.dumps(snapshot, default=str),
+            json.dumps(load_temps, default=str) if load_temps else None,
+        ]
+        placeholders = ",".join("?" * len(cols))
+        self._conn.execute(
+            "INSERT INTO samples (%s) VALUES (%s)" % (",".join(cols), placeholders),
+            values,
+        )
+        self._conn.commit()
+
+    # --- state segments -----------------------------------------------
+
+    def record_state(self, oven_id, ts, state, reason):
+        """Open a new state segment when the state changes, closing the last.
+
+        No-op while the state is unchanged, so a 6-hour RUNNING stretch is
+        one row rather than 720.
+        """
+        current = self._open_state.get(oven_id)
+        if current is not None and current["state"] == state:
+            return
+        if current is not None:
+            self._conn.execute(
+                "UPDATE state_events SET ts_end = ? WHERE id = ?",
+                (ts.isoformat(), current["id"]),
+            )
+        cur = self._conn.execute(
+            "INSERT INTO state_events (oven_id, ts_start, state, reason) VALUES (?,?,?,?)",
+            (oven_id, ts.isoformat(), state, reason),
+        )
+        self._open_state[oven_id] = {"id": cur.lastrowid, "state": state}
+        self._conn.commit()
+
+    def resume_open_states(self):
+        """Re-attach to any state segment left open by a previous run.
+
+        Without this, restarting the collector closes nothing and opens a
+        duplicate segment for a state the oven never actually re-entered,
+        which would show up as a spurious transition in uptime reporting.
+        """
+        rows = self._conn.execute(
+            "SELECT id, oven_id, state FROM state_events WHERE ts_end IS NULL"
+        ).fetchall()
+        for row_id, oven_id, state in rows:
+            self._open_state[oven_id] = {"id": row_id, "state": state}
+
+    # --- retention ----------------------------------------------------
+
+    def prune_samples(self, now):
+        """Drop samples older than the configured retention, if any.
+
+        Defaults to keeping everything - see the module docstring. Set
+        config.SAMPLE_RETENTION_DAYS once the cloud API is the long-term
+        store and local SQLite is genuinely just a publish buffer.
+        """
+        days = getattr(config, "SAMPLE_RETENTION_DAYS", None)
+        if not days:
+            return
+        cutoff = (now - timedelta(days=days)).isoformat()
+        self._conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff,))
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
+
+
+def _as_number(value):
+    """Coerce a PLC value to something SQLite will store in a REAL column.
+
+    BOOLs arrive as Python bools and store as 0/1; byte blobs from an
+    unexpectedly-structured tag are not numbers and are dropped to NULL
+    here rather than raising - the full value still lands in
+    snapshot_json either way.
+    """
+    if value is None or isinstance(value, bool):
+        return int(value) if isinstance(value, bool) else None
+    if isinstance(value, (int, float)):
+        return value
+    return None
+
+
+def summarize_load_temps(load_temps):
+    """Aggregate the load thermocouples, excluding known-dead probes.
+
+    A probe pinned at config.INVALID_TC_F is at type J full scale, which
+    means "no signal", not a real temperature - averaging it in would drag
+    the load temperature up by hundreds of degrees. The card's own
+    open-circuit and over-range bits do NOT flag this case, so the filter
+    has to happen here.
+
+    valid_count is stored alongside the aggregates so a load temperature
+    derived from three surviving probes is distinguishable from one
+    derived from all eleven.
+    """
+    empty = {"min": None, "mean": None, "max": None, "valid_count": 0}
+    if not load_temps:
+        return empty
+    good = [
+        v for v in load_temps.values()
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+        and v != config.INVALID_TC_F
+    ]
+    if not good:
+        return empty
+    return {
+        "min": min(good),
+        "mean": sum(good) / len(good),
+        "max": max(good),
+        "valid_count": len(good),
+    }
