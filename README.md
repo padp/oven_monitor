@@ -121,9 +121,12 @@ percentage to mean more than that.
 
 ### Deploying the cloud API (one-time, manual)
 
-1. On Render, create a new Web Service from this repo. Build command: none needed
-   (pip installs via `api/requirements.txt` is Render's default for Python).
-   Start command is already in `Procfile`.
+1. On Render, create a new Web Service from this repo. **Build command must be set
+   explicitly** to `pip install -r api/requirements.txt` - Render's zero-config Python
+   default is `pip install -r requirements.txt` at the repo root, which is the
+   collector's dependencies (`pylogix`, `requests`), not the API's. Leaving the build
+   command unset installs the wrong file, gunicorn is never installed, and every route
+   502s. Start command is already in `Procfile` and needs no change.
 2. Set env vars: `SQL_PASS` (the Atlas cluster password) and `INGEST_API_KEY`
    (any random string - the publisher must send the same value).
 3. Confirm `https://oven-monitor.onrender.com/api/health` returns
