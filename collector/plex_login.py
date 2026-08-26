@@ -30,13 +30,26 @@ USER_AGENT = (
 )
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# Absolute, not the reference's "../secret/..." - resolved from __file__ so it
-# works regardless of the caller's working directory, matching this project's
-# own collector/config.py and publisher/config.py convention (a relative path
-# tied to CWD is exactly the class of bug the mapped-drive-letter Task
-# Scheduler issue earlier in this project turned out to be).
-LOGIN_SECRETS_PATH = os.path.join(_PROJECT_ROOT, "secret", "plex_login_infos.txt")
-SESSION_SECRETS_PATH = os.path.join(_PROJECT_ROOT, "secret", "plex_infos.txt")
+# Extrusion DB/ - the parent of every sibling project's own folder, including
+# this one and "Fetch Log Data".
+_EXTRUSION_DB_ROOT = os.path.dirname(_PROJECT_ROOT)
+
+# Deliberately the SAME shared files "Fetch Log Data" already logs in with and
+# keeps refreshed (Extrusion DB/secret/login_infos.txt, .../infos.txt) - not a
+# separate copy under this project's own secret/. One Plex login/session
+# shared across every script that needs it, rather than each maintaining an
+# independent session for the same account: whichever project's client next
+# hits an expired session refreshes this same file, and every other project
+# reading it picks up the fresh value on its next call. Confirmed to exist at
+# this path 2026-08-26 (both files predate this project).
+#
+# Absolute and resolved from __file__ rather than a relative "../../secret/..."
+# tied to the caller's working directory - a relative path is exactly the
+# class of bug the mapped-drive-letter Task Scheduler issue earlier in this
+# project turned out to be, and it would be worse here since it reaches
+# outside this project's own directory entirely.
+LOGIN_SECRETS_PATH = os.path.join(_EXTRUSION_DB_ROOT, "secret", "login_infos.txt")
+SESSION_SECRETS_PATH = os.path.join(_EXTRUSION_DB_ROOT, "secret", "infos.txt")
 
 
 def extract_asid(resp: requests.Response) -> str | None:
@@ -213,10 +226,12 @@ def renew_credentials(secrets_path: str, username: str, password: str, company_c
 
 if __name__ == "__main__":
     # One-time manual bootstrap: python -m collector.plex_login
-    # Logs in once and writes secret/plex_infos.txt, so the first call from
-    # collector/plex.py has a session to load rather than needing to log in
-    # itself on the very first use. Requires secret/plex_login_infos.txt
-    # (username/password/company_code, KEY=value lines) to already exist.
+    # Logs in once and writes the SHARED Extrusion DB/secret/infos.txt (also
+    # used by "Fetch Log Data"), so the first call from collector/plex.py has
+    # a session to load rather than needing to log in itself on the very
+    # first use. Requires Extrusion DB/secret/login_infos.txt
+    # (username/password/company_code, KEY=value lines) to already exist -
+    # it does, since "Fetch Log Data" already uses it.
     login_secrets = load_credentials(LOGIN_SECRETS_PATH)
     creds = login_and_get_credentials(
         username=login_secrets["username"],

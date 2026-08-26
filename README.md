@@ -250,10 +250,14 @@ against the same Plex tenant.
     serial = loads[0]["ContainersData"][0]["SerialNo"]
     container = plex.get_container(serial, start_date="...", end_date="...")
 
-Requires `secret/plex_login_infos.txt` (`username=`/`password=`/`company_code=`) before
-first use. `secret/plex_infos.txt` (the live session) is created automatically on first
-use, or bootstrap it by hand with `python -m collector.plex_login`. Both files are
-covered by the `secret/` gitignore rule.
+Uses the **same shared Plex login/session** the "Fetch Log Data" project already logs
+in with and keeps refreshed - `Extrusion DB/secret/login_infos.txt` and
+`Extrusion DB/secret/infos.txt`, one level up from every sibling project's own folder,
+not a separate copy under this project's own `secret/`. No new setup needed: whichever
+project's client next hits an expired session refreshes that shared file, and every
+other project reading it picks up the fresh value on its next call. Both files are
+outside this repo's directory entirely, so they can never be committed here by
+accident. To bootstrap a fresh login by hand: `python -m collector.plex_login`.
 
 Deliberately **not** wired into the poll loop, storage schema, or the dashboard yet -
 this is just the callable client. `WorkcenterKey "58085"` is confirmed as

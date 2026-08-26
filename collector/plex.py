@@ -14,10 +14,12 @@ a workcenter (temperature, actual start/end time, and the container serial
 numbers loaded into each cycle); get_container() takes one of those serial
 numbers and returns its part/quantity.
 
-Requires secret/plex_login_infos.txt (username / password / company_code,
-KEY=value lines) to exist before first use. secret/plex_infos.txt (the live
-ASID/AUTH_PROD session) does not need to exist ahead of time - the first call
-that needs it logs in fresh and creates it.
+Uses the SAME shared login/session files "Fetch Log Data" already logs in with
+and keeps refreshed - Extrusion DB/secret/login_infos.txt and .../infos.txt,
+one level up from every sibling project's own folder (see
+plex_login.LOGIN_SECRETS_PATH / SESSION_SECRETS_PATH) - rather than a separate
+copy under this project's own secret/. One Plex session shared across every
+script that needs it, so nothing here needs its own login setup.
 """
 
 import requests
@@ -55,7 +57,7 @@ def _apply_cookies(creds):
 
 
 def _reauth():
-    """Log in fresh, overwrite plex_infos.txt, and pick up the new ASID/AUTH_PROD."""
+    """Log in fresh, overwrite the shared infos.txt, and pick up the new ASID/AUTH_PROD."""
     global _secrets
     _secrets = plex_login.renew_credentials(
         secrets_path=plex_login.SESSION_SECRETS_PATH,
