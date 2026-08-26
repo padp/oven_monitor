@@ -68,8 +68,14 @@ def _reauth():
     _apply_cookies(_secrets)
 
 
-def _post(url, params, json, timeout=15):
-    """POST with a single retry: re-login once if the session has expired (401/403/419)."""
+def _post(url, params, json, timeout=45):
+    """POST with a single retry: re-login once if the session has expired (401/403/419).
+
+    45s, not the reference's 15s: a real live call against FurnaceLoad/Search
+    (142 rows, workcenter 58085) measured at 17.8s on 2026-08-26 - Plex Cloud
+    itself appears to just be this slow for a search over a multi-day window,
+    not a sign of anything broken. 15s clipped that call every time.
+    """
     _ensure_logged_in()
     resp = session.post(url, params={**params, "__asid": _secrets["ASID"]}, json=json, timeout=timeout)
 
