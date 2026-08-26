@@ -87,6 +87,31 @@ mid-write, where the legacy poller died partway through the day. A strict JSON p
 rejects the whole file, though the records before the break are recoverable. This is a
 direct argument for the new collector's row-at-a-time SQLite commits.
 
+## API and dashboard
+
+    python -m api.app                      # read-only HTTP API on :8000
+    cd docs && python -m http.server 8781  # dashboard
+
+Then open `http://localhost:8781/index.html?api=http://localhost:8000`.
+
+`api/` mirrors granco_monitor's shape and will mirror its deployment (Flask on Render,
+MongoDB Atlas) once `publisher/` exists. Until then it reads the collector's SQLite
+directly via `api/store.py`, so the dashboard is useful now rather than after the whole
+cloud pipeline lands. Swapping the backing store later means reimplementing `store.py`
+and nothing else - `api/app.py` never sees SQL. There is no `/ingest` yet because
+nothing publishes yet.
+
+The dashboard is a **tag monitor**: every canonical field with the PLC tag it came from
+and its raw value, grouped and filterable. Above it sits a "Needs attention" panel that
+calls out what is actually actionable - collector gone quiet, faults, load probes
+reading invalid, and the bits whose polarity is still unconfirmed.
+
+Values are displayed exactly as the PLC reported them. Rows flagged `polarity?` are the
+unconfirmed bits, shown raw so a `true` is not mistaken for meaning what the tag name
+says. The 24h panel deliberately says "share of observed time" rather than uptime -
+the collector has not run long enough, and no full cycle has been watched yet, for a
+percentage to mean more than that.
+
 ## Oven state model
 
 `OvenState` is RUNNING / IDLE / FAULT / UNKNOWN. `determine_state()` in

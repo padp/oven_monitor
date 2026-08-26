@@ -7,6 +7,10 @@ secret/
 # backfill source for the cloud DB - but it does not belong in git.
 Large_Oven_Status_*.json
 
+# Untouched originals of the four daily files that were truncated mid-write
+# by the legacy poller, kept beside their repaired versions.
+legacy_corrupt_backup/
+
 # Generated Excel reports from generate_large_oven_report.py
 Reports/
 

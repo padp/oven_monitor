@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oven Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <span class="app-header-title">Oven Monitor</span>
+    <div class="app-header-meta">
+      <span id="oven-picker-wrap" class="app-header-subtitle"></span>
+      <span id="last-updated" class="app-header-subtitle">connecting...</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="status-row">
+        <span id="state-badge" class="badge UNKNOWN">UNKNOWN</span>
+        <div>
+          <div id="oven-name" style="font-weight: 700;">-</div>
+          <div id="status-reason" class="status-reason">-</div>
+        </div>
+      </div>
+      <div id="stale-banner" class="banner hidden"></div>
+    </section>
+
+    <section class="card">
+      <h2>Needs attention</h2>
+      <div id="attention-list"></div>
+    </section>
+
+    <section class="card">
+      <h2>Key indicators</h2>
+      <div id="tile-grid" class="tile-grid"></div>
+    </section>
+
+    <section class="card" id="probe-card">
+      <h2>Load thermocouples</h2>
+      <div id="probe-grid" class="probe-grid"></div>
+      <p class="footnote" id="probe-note"></p>
+    </section>
+
+    <section class="card">
+      <h2>Tag monitor</h2>
+      <div class="table-tools">
+        <input type="search" id="tag-filter" placeholder="Filter by field or PLC tag...">
+        <label><input type="checkbox" id="only-flagged"> Only flagged</label>
+        <label><input type="checkbox" id="group-tags" checked> Group</label>
+      </div>
+      <div class="overflow-wrap">
+        <table id="tag-table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>PLC tag</th>
+              <th>Value</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="footnote">
+        Values are shown exactly as the PLC reported them &mdash; no polarity correction and no
+        substituted defaults. Rows marked <span class="flag">polarity?</span> are bits whose
+        wiring is still unconfirmed, so a <code>true</code> there does not yet mean what the tag
+        name suggests. See <code>reference/oven_91_tag_map.md</code>.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Observed state, last 24h</h2>
+      <div id="state-summary"></div>
+      <p class="footnote">
+        Share of <em>observed</em> time only &mdash; not an uptime figure. The collector has not
+        been running long enough, and the small oven has not been watched through a full cycle
+        yet, for a percentage to mean more than this.
+      </p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
