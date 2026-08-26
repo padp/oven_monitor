@@ -112,6 +112,18 @@ says. The 24h panel deliberately says "share of observed time" rather than uptim
 the collector has not run long enough, and no full cycle has been watched yet, for a
 percentage to mean more than that.
 
+## Running it for real
+
+The collector runs as a Windows service on the same host as the legacy poller. See
+[`service/README.md`](service/README.md):
+
+    .\Install-OvenServices.ps1 -ServiceAccount 'DOMAIN\svc_oven'
+    .\Oven-Services.ps1 status
+
+The database is kept on **local disk** (`OVEN_DB_DIR`), not the share - SQLite's
+locking needs file-lock primitives SMB only partially emulates. A useful consequence
+is that the service account needs only READ on the share.
+
 ## Oven state model
 
 `OvenState` is RUNNING / IDLE / FAULT / UNKNOWN. `determine_state()` in
