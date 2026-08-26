@@ -9,7 +9,7 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -28,10 +28,22 @@ def _connect():
 
 
 def _parse_ts(value):
+    """Parse a stored ts string, always returning a timezone-AWARE datetime.
+
+    New rows are UTC-aware (collector writes datetime.now(timezone.utc)).
+    A handful of early rows from before that fix are naive local time - a
+    naive value here is treated as UTC rather than left ambiguous, so it
+    can never crash a subtraction against an aware "now". This is a
+    one-time approximation for that first batch of data, not a general
+    guarantee those specific old rows' ages are exactly right.
+    """
     try:
-        return datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(value)
     except (TypeError, ValueError):
         return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def ovens():
@@ -96,7 +108,7 @@ def current(oven_id):
     fields.sort(key=lambda f: f["field"])
 
     ts = _parse_ts(row["ts"])
-    age = (datetime.now() - ts).total_seconds() if ts else None
+    age = (datetime.now(timezone.utc) - ts).total_seconds() if ts else None
 
     return {
         "oven": {"id": oven["id"], "name": oven["name"], "ip": oven["ip"],
@@ -131,7 +143,7 @@ def current(oven_id):
 
 def history(oven_id, hours=6, limit=2000):
     """Time series for charting. Newest last."""
-    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     with _connect() as conn:
         rows = conn.execute(
             """SELECT ts, state, zone1_temp, zone2_temp, setpoint, zone1_burner,
@@ -146,7 +158,7 @@ def history(oven_id, hours=6, limit=2000):
 
 def states(oven_id, hours=24):
     """State segments plus a duration rollup, for uptime reporting."""
-    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     with _connect() as conn:
         rows = conn.execute(
             """SELECT ts_start, ts_end, state, reason FROM state_events
@@ -155,7 +167,7 @@ def states(oven_id, hours=24):
             (oven_id, cutoff),
         ).fetchall()
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     segments = []
     totals = {}
     for r in rows:

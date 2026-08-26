@@ -215,11 +215,11 @@ OVENS = {
         "id": "large",
         "name": "Large Oven",
         "ip": "10.4.20.93",
-        # Off for now. large_oven_status.py continues to cover this oven;
-        # turning this on is safe (read-only pollers coexist fine on
-        # EtherNet/IP) but is a separate step from establishing the small
-        # oven's pattern.
-        "enabled": False,
+        # Enabled 2026-08-26, alongside the small oven's pattern-establishing
+        # run. large_oven_status.py keeps running too - read-only pollers
+        # coexist fine on EtherNet/IP - as a redundant, independently-proven
+        # data source while this collector's coverage of .93 is new.
+        "enabled": True,
         "tags": LARGE_OVEN_TAGS,
         "load_tc_tags": [],
         "scales": {},

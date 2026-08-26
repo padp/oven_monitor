@@ -11,7 +11,7 @@ straight table dump, and means a new canonical field needs no schema
 change anywhere in the pipeline.
 """
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from collector import config as collector_config
 from .db import get_db
@@ -20,10 +20,22 @@ STALE_AFTER_S = collector_config.POLL_INTERVAL_S * 2.5
 
 
 def _parse_ts(value):
+    """Parse a stored ts string, always returning a timezone-AWARE datetime.
+
+    New rows are UTC-aware (collector writes datetime.now(timezone.utc)).
+    A handful of early rows from before that fix are naive local time - a
+    naive value here is treated as UTC rather than left ambiguous, so it
+    can never crash a subtraction against an aware "now". This is a
+    one-time approximation for that first batch of data, not a general
+    guarantee those specific old rows' ages are exactly right.
+    """
     try:
-        return datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(value)
     except (TypeError, ValueError):
         return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _latest(db, oven_id):
@@ -73,7 +85,7 @@ def current(oven_id):
     fields.sort(key=lambda f: f["field"])
 
     ts = _parse_ts(row["ts"])
-    age = (datetime.now() - ts).total_seconds() if ts else None
+    age = (datetime.now(timezone.utc) - ts).total_seconds() if ts else None
 
     return {
         "oven": oven_meta,
@@ -92,7 +104,7 @@ def current(oven_id):
 
 
 def history(oven_id, hours=6, limit=2000):
-    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     keep = ("ts", "state", "zone1_temp", "zone2_temp", "setpoint", "zone1_burner",
             "zone2_burner", "cycle_time_left_min", "exhaust_fan_active",
             "load_temp_mean", "load_temp_min", "load_temp_max")
@@ -104,14 +116,14 @@ def history(oven_id, hours=6, limit=2000):
 
 
 def states(oven_id, hours=24):
-    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     rows = list(get_db().state_events.find(
         {"oven_id": oven_id,
          "$or": [{"ts_end": None}, {"ts_end": {"$gte": cutoff}}]},
         projection={"_id": False},
     ).sort("ts_start", 1))
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     segments = []
     totals = {}
     for r in rows:

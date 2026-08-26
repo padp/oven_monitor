@@ -7,7 +7,7 @@ the other - which matters as soon as the large oven is switched on
 alongside the small one.
 """
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     from . import config
@@ -106,7 +106,12 @@ def run():
     last_state = {}
     try:
         while True:
-            ts = datetime.now()
+            # UTC, not local time: the collector runs on the poller host (US
+            # Central) but the deployed API runs on Render (UTC). A naive
+            # local timestamp compared against a naive UTC "now" server-side
+            # produced a phantom multi-hour "stale" reading - the data was
+            # actually only minutes old.
+            ts = datetime.now(timezone.utc)
             for p in pollers:
                 try:
                     state, reason = p.poll(ts, storage)
