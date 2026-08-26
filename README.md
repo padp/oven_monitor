@@ -4,8 +4,8 @@ Uptime and cycle monitoring for the plant's two aging ovens.
 
 | Oven | PLC | Status |
 |------|-----|--------|
-| Large oven | `10.4.20.93` | Monitored since 2025-10-24 by the legacy poller (below). Tag map proven. |
-| Second oven | `10.4.20.91` | Not monitored yet. Tags need member-level discovery (UDT-heavy). |
+| **Large** oven | `10.4.20.93` | Monitored since 2025-10-24 by the legacy poller (below). Tag map proven. |
+| **Small** oven | `10.4.20.91` | Not monitored yet. Tag map now discovered - see `reference/oven_91_tag_map.md`. |
 
 ## Current state
 
@@ -68,7 +68,12 @@ Different naming convention from `.93` - UDT-heavy. `BURNER_1`, `BURNER_2`, `OVE
 byte blobs via a plain `Read()` and need member-level paths. Only confirmed clean
 scalar so far: `BURNER_CONTROL_TEMPERATURE`.
 
-Still to map: zone temps, per-burner active status, cycle/soak timing, fault bits.
+Now mapped - see [`reference/oven_91_tag_map.md`](reference/oven_91_tag_map.md) for the
+full map, including two findings that must be respected before ingesting anything:
+the `LOAD_TEMP_TO_MMI` probe is failed (pinned at type-J full scale) and the real load
+temperatures come from `OVEN_AUX_THERMOCOUPLE`'s eleven probes; and several
+permissive/limit booleans appear to be wired normally-closed, so their names read
+backwards.
 
 ## Conventions
 
