@@ -1,0 +1,36 @@
+# Credentials - never commit
+secret/
+
+# Historical status logs from the legacy poller.
+# ~500MB and growing by one ~2MB file per day; this is generated data, not source.
+# It IS valuable (10+ months of real oven history) and stays on disk here - it's the
+# backfill source for the cloud DB - but it does not belong in git.
+Large_Oven_Status_*.json
+
+# Generated Excel reports from generate_large_oven_report.py
+Reports/
+
+# Local SQLite data (collector buffer + publisher checkpoint)
+db/*.db
+db/*.db-journal
+db/*.db-wal
+db/*.db-shm
+
+# Generated PLC tag dumps
+discovered_tags*.csv
+tag_dump*.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Editor/OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
