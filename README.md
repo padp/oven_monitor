@@ -167,6 +167,25 @@ file-lock primitives SMB only partially emulates. Set `OVEN_DB_DIR` in the sched
 task's environment (or in the task's action, e.g. `cmd /c "set OVEN_DB_DIR=C:\Oven\db && python run_collector.py"`)
 to a local path.
 
+**Point the scheduled task at the project by its full UNC path, never a mapped drive
+letter** (`\\file1\User\Extrusion DB\Large Oven Uptime Monitoring`, not `T:\...`). Both
+scripts derive every other path - `secret/oven_publisher.txt`, the checkpoint DB, the
+default `db/` location - from wherever they were actually launched from
+(`os.path.abspath(__file__)`), so whatever path style the task's Action uses is the one
+that propagates everywhere. Mapped drives are tied to the interactive logon session
+that created them; a task running as a service account, "whether user is logged on or
+not," or in a different session simply does not see that drive letter, and the task
+fails (or worse, silently resolves to nothing) even though it works fine when you test
+it by hand while logged in. Set the Action's Program/Script and Start-in fields to the
+UNC path, e.g.:
+
+    Program/script:  python.exe
+    Arguments:        \\file1\User\Extrusion DB\Large Oven Uptime Monitoring\run_publisher.py
+    Start in:         \\file1\User\Extrusion DB\Large Oven Uptime Monitoring
+
+After changing this, re-run `--check` under the same account the task will run as and
+confirm every printed path starts with `\\file1\...`, not `T:\...`.
+
 `service/` (NSSM-based Windows services, mirroring granco_monitor's approach) is kept
 in the repo but **not used** for this project - Task Scheduler is the actual
 deployment method. See [`service/README.md`](service/README.md) only if that ever
