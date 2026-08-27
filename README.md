@@ -237,6 +237,22 @@ temperatures come from `OVEN_AUX_THERMOCOUPLE`'s eleven probes; and several
 permissive/limit booleans appear to be wired normally-closed, so their names read
 backwards.
 
+## Program number - two independent sources, cross-checked
+
+Confirmed live 2026-08-27 on both ovens: the PLC's own `RECIPE_NUMBER` (large oven,
+now a canonical field) / `OVEN_RECIPE_CONTROL.Recipe_Number_Running` (small oven)
+matches the program number embedded in Plex's `OperationCode` string
+(`"Aging Prog #006 330_3.7"` -> 6) exactly. Both are shown - a "Program #" tile from
+the PLC in Key Indicators, and one from Plex on the Current Job card - and the
+dashboard's "Needs attention" panel flags a mismatch if they ever disagree, since
+that would mean something is genuinely wrong (wrong recipe loaded, or Plex tracking
+the wrong load), not just a display quirk.
+
+Plex has no dedicated numeric field for this - only the free-text `OperationCode`,
+parsed by `collector/plex_sync.py`'s `_program_number()`. Some codes name two
+candidates (`"Aging Prog #002 OR #018"`, observed live) - genuinely ambiguous from
+the string alone, so that returns `None` rather than guessing.
+
 ## Cycle time remaining - computed, not read from the PLC
 
 Confirmed live 2026-08-27: neither oven has a PLC tag that live-counts remaining

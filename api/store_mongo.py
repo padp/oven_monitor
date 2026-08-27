@@ -185,8 +185,8 @@ def current_plex_load(oven_id):
     age = (datetime.now(timezone.utc) - ts).total_seconds() if ts else None
 
     keep = ("ts", "confirmed", "furnace_load_no", "furnace_load_status",
-            "operation_code", "temperature", "actual_start_time", "actual_end_time",
-            "serial_no", "job_no", "part_no", "part_name", "quantity")
+            "operation_code", "program_number", "temperature", "actual_start_time",
+            "actual_end_time", "serial_no", "job_no", "part_no", "part_name", "quantity")
     out = {k: row.get(k) for k in keep}
     out["confirmed"] = bool(out["confirmed"])
     cj = row.get("containers_json")

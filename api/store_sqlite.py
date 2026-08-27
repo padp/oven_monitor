@@ -242,6 +242,10 @@ def current_plex_load(oven_id):
         "furnace_load_no": row["furnace_load_no"],
         "furnace_load_status": row["furnace_load_status"],
         "operation_code": row["operation_code"],
+        # row["program_number"] would raise on a database whose collector
+        # has not restarted since this column was added (see _migrate()) -
+        # membership-check rather than crash the whole endpoint meanwhile.
+        "program_number": row["program_number"] if "program_number" in row.keys() else None,
         "temperature": row["temperature"],
         "actual_start_time": row["actual_start_time"],
         "actual_end_time": row["actual_end_time"],

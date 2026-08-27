@@ -42,6 +42,9 @@ LARGE_OVEN_TAGS = {
     "Z1_ACTUAL_TEMP": "zone1_temp",
     "Z2_ACTUAL_TEMP": "zone2_temp",
     "OVEN_TEMP_SETPOINT": "setpoint",
+    # The active program/recipe number - confirmed live 2026-08-27 reading
+    # 2 while running "Aging Prog #002 365_6hrs" per Plex, matching exactly.
+    "RECIPE_NUMBER": "recipe_number",
     "ZONE_1_BURNER_MTR": "zone1_burner",
     "ZONE_2_BURNER_MTR": "zone2_burner",
     "CYCLE_TOTAL_MINUTES_LEFT": "cycle_time_left_min",
@@ -90,6 +93,13 @@ SMALL_OVEN_TAGS = {
     "OVEN_AUTO_MANUAL.OVEN_AUTO_MODE_ENABLED": "auto_mode_selected",
     "OVEN_AUTO_MANUAL.OVEN_MANUAL_MODE_ENABLED": "manual_mode_selected",
     "OVEN_AUTO_MANUAL.OVEN_PLC_OK": "power_feed",
+
+    # The active program/recipe number - confirmed live 2026-08-27 reading
+    # 6 while running "Aging Prog #006 330_3.7" per Plex, matching exactly.
+    # Recipe_Number_Running specifically (not .Recipe_Number, which reads
+    # the same right now but is presumably the one being EDITED/selected
+    # rather than what's actually executing - Running is the safer choice).
+    "OVEN_RECIPE_CONTROL.Recipe_Number_Running": "recipe_number",
 
     # Flame / firing state - richer than the large oven exposes.
     "BURNER_1.MAIN_FLAME_ON": "burner1_flame_on",

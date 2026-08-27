@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS plex_loads (
     furnace_load_no TEXT,
     furnace_load_status TEXT,
     operation_code TEXT,
+    program_number INTEGER,
     temperature REAL,
     actual_start_time TEXT,
     actual_end_time TEXT,
@@ -134,6 +135,8 @@ class Storage:
         existing = {row[1] for row in self._conn.execute("PRAGMA table_info(plex_loads)")}
         if existing and "containers_json" not in existing:
             self._conn.execute("ALTER TABLE plex_loads ADD COLUMN containers_json TEXT")
+        if existing and "program_number" not in existing:
+            self._conn.execute("ALTER TABLE plex_loads ADD COLUMN program_number INTEGER")
 
     # --- samples ------------------------------------------------------
 
@@ -172,7 +175,7 @@ class Storage:
         """
         cols = [
             "oven_id", "ts", "confirmed", "furnace_load_no", "furnace_load_status",
-            "operation_code", "temperature", "actual_start_time", "actual_end_time",
+            "operation_code", "program_number", "temperature", "actual_start_time", "actual_end_time",
             "serial_no", "job_no", "part_no", "part_name", "quantity", "containers_json",
         ]
         values = [oven_id, ts.isoformat(), int(load.get("confirmed", False))]

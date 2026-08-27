@@ -91,7 +91,7 @@ function groupFor(field) {
 
 /* --- actionable summary ---------------------------------------- */
 
-function buildAttention(data, states) {
+function buildAttention(data, states, job) {
   const items = [];
   const s = data.sample || {};
   const fields = new Map((data.fields || []).map((f) => [f.field, f.value]));
@@ -145,6 +145,20 @@ function buildAttention(data, states) {
   if (fields.get("burner2_high_temp_fault") === true) b2.push("high temperature fault");
   if (b2.length) {
     items.push({ sev: "warn", icon: "⚠", title: "Burner 2 fault bits set", detail: b2.join(", ") });
+  }
+
+  // Cross-check the PLC's own recipe/program number against the one
+  // embedded in Plex's OperationCode. Both are independent sources for the
+  // same fact - a mismatch means something is actually wrong (the wrong
+  // recipe is loaded, or Plex is tracking the wrong load), not just a
+  // display quirk, so it is worth surfacing even though neither number is
+  // wrong to display on its own.
+  const plcProgram = fields.get("recipe_number");
+  const plexProgram = job && job.program_number;
+  if (plcProgram != null && plexProgram != null && Number(plcProgram) !== Number(plexProgram)) {
+    items.push({ sev: "warn", icon: "⚠", title: "Program number mismatch",
+      detail: `PLC reports program ${plcProgram}, Plex's current load reports program ` +
+        `${plexProgram} (from "${job.operation_code}"). One of these is tracking the wrong recipe.` });
   }
 
   if (!items.length) {
@@ -244,6 +258,12 @@ function renderTiles(data) {
       "computed from the recipe, not a PLC countdown"],
     ["Exhaust", fmtNum(s.exhaust_fan_active, 0, " Hz"), "VFD output frequency"],
     doorsTile(s),
+    // From the PLC directly (RECIPE_NUMBER / Recipe_Number_Running) - cross-
+    // checked against Plex's own copy (embedded in OperationCode) in the
+    // "Needs attention" panel above, since they are two independent sources
+    // for the same fact and a mismatch would mean something is really wrong.
+    ["Program #", f.has("recipe_number") ? String(f.get("recipe_number")) : "&ndash;",
+      "from the PLC"],
   ];
   document.getElementById("tile-grid").innerHTML = tiles.map(([label, value, sub]) => `
     <div class="tile">
@@ -328,6 +348,7 @@ function renderJob(job, ovenState) {
       <div class="tile"><div class="tile-label">Quantity</div><div class="tile-value">${fmtNum(job.quantity, 0)}</div></div>
       <div class="tile"><div class="tile-label">Furnace Load</div><div class="tile-value">${job.furnace_load_no || "&ndash;"}</div><div class="tile-sub">${job.furnace_load_status || ""}</div></div>
       <div class="tile"><div class="tile-label">Target Temp</div><div class="tile-value">${fmtNum(job.temperature, 0, "°F")}</div></div>
+      <div class="tile"><div class="tile-label">Program #</div><div class="tile-value">${job.program_number != null ? job.program_number : "&ndash;"}</div><div class="tile-sub">from Plex</div></div>
     </div>
     ${staleNote}
     ${containers.length > 1 ? `
@@ -410,7 +431,7 @@ async function refresh() {
     if (cur.error) throw new Error(cur.error);
     latest = cur;
     renderStatus(cur);
-    renderAttention(buildAttention(cur, st));
+    renderAttention(buildAttention(cur, st, jobResp.load));
     renderTiles(cur);
     renderProbes(cur);
     renderTags(cur);

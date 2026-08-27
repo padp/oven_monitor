@@ -12,11 +12,30 @@ Must run on a machine with both LAN access to the shared
 Extrusion DB/secret/ credentials and internet access to cloud.plex.com - the
 poller host, not Render (which can reach neither).
 """
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
 from . import config, plex
 from .storage import Storage
+
+_PROGRAM_NUMBER_RE = re.compile(r"#(\d+)")
+
+
+def _program_number(operation_code):
+    """Pull the program/recipe number out of OperationCode.
+
+    Plex has no dedicated numeric field for this - only the free-text
+    OperationCode ("Aging Prog #006 330_3.7"), which is what the PLC's own
+    RECIPE_NUMBER-equivalent tags are cross-checked against on the
+    dashboard. Some codes name two candidates ("Aging Prog #002 OR #018",
+    observed live) - genuinely ambiguous from the string alone, so this
+    returns None rather than guessing which one actually ran.
+    """
+    if not operation_code:
+        return None
+    matches = _PROGRAM_NUMBER_RE.findall(operation_code)
+    return int(matches[0]) if len(matches) == 1 else None
 
 # Plex latency (2-20s+ per call, sometimes more on a cold login) is much
 # higher than the PLC's, and job/part context does not change nearly as
@@ -115,6 +134,7 @@ def _flatten(load, confirmed):
         "furnace_load_no": load.get("FurnaceLoadNo"),
         "furnace_load_status": load.get("FurnaceLoadStatus"),
         "operation_code": load.get("OperationCode"),
+        "program_number": _program_number(load.get("OperationCode")),
         "temperature": c0.get("Temperature"),
         "actual_start_time": c0.get("ActualStartTime"),
         "actual_end_time": c0.get("ActualEndTime"),
