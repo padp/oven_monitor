@@ -156,27 +156,32 @@ INVALID_TC_F = 2192.0
 SMALL_OVEN_SCALES = {"cycle_time_left_min": 60.0}
 
 # --- Bit polarity -----------------------------------------------------
-# UNRESOLVED, and deliberately not applied yet.
-#
-# Five discrete bits on the small oven contradict observed reality in the
-# same direction, consistent with normally-closed (fail-safe) wiring that
-# makes the tag name read backwards:
-#
-#   FULL_DOWN_LIMIT_SWITCH (both doors)  True while doors reported open
-#   BURNER_n.BURNER_AT_HIGH_FIRE         True while flame off, rate 0
-#   BURNER_n.HIGH_LIMIT_OK               False with no high-temp fault
-#   OVEN_AUTO_MANUAL.OVEN_PLC_OK         False while the PLC is answering
-#
-# It is a hypothesis, not a confirmed fact, and it does not cleanly
-# explain the burner-2 gas-pressure reading. So: the collector stores
-# every bit RAW, exactly as the PLC reports it, and the detector does not
-# gate any state decision on the fields listed here. Once a logged cycle
-# shows these bits actually moving, polarity can be settled from the data
-# and applied at read time - without a wrong guess having corrupted the
-# stored history.
-ACTIVE_LOW_SUSPECTS = {
+# The collector still stores every bit RAW, exactly as the PLC reports it,
+# regardless of what's confirmed below - interpretation happens at read
+# time (api/store_*.py), never in storage, so a correction here can never
+# retroactively change what's on disk.
+
+# CONFIRMED 2026-08-27, via two independent real-world checks on different
+# days with the door in different physical states, both correctly predicted
+# by the SAME inversion:
+#   2026-08-26: raw True,  doors physically OPEN   (operator-confirmed)
+#   2026-08-27: raw False, doors physically CLOSED (cycle running)
+# i.e. FULL_DOWN_LIMIT_SWITCH is wired normally-closed - invert the raw
+# value to get the true door state. Applied in api/store_*.py as derived
+# entrance_door_closed / exit_door_closed fields; the raw
+# entrance_door_down / exit_door_down fields are unaffected and still show
+# exactly what the PLC reports.
+CONFIRMED_ACTIVE_LOW = {
     "entrance_door_down",
     "exit_door_down",
+}
+
+# Still genuinely unresolved. OVEN_PLC_OK reads False while the PLC is
+# plainly fine (it answered the read), which is consistent with the same
+# normally-closed pattern as the doors, but that is circumstantial, not
+# independently confirmed against a real-world state the way the doors now
+# are - so it is not corrected anywhere, only flagged.
+ACTIVE_LOW_SUSPECTS = {
     "power_feed",
 }
 

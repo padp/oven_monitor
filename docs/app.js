@@ -190,23 +190,50 @@ function renderAttention(items) {
     </div>`).join("");
 }
 
+function burnerTile(label, flameOn, pilotOn) {
+  const value = flameOn === true ? "ON" : flameOn === false ? "OFF" : "&ndash;";
+  const sub = flameOn === false && pilotOn === true ? "pilot lit" : "";
+  return [label, value, sub];
+}
+
+function doorsTile(s) {
+  const e = s.entrance_door_closed, x = s.exit_door_closed;
+  if (e === null || e === undefined || x === null || x === undefined) {
+    return ["Doors", "&ndash;", "polarity-corrected - see footnote below"];
+  }
+  if (e === x) {
+    return ["Doors", e ? "CLOSED" : "OPEN", "polarity-corrected - see footnote below"];
+  }
+  return ["Doors", `entrance ${e ? "closed" : "open"}, exit ${x ? "closed" : "open"}`,
+    "polarity-corrected - see footnote below"];
+}
+
 function renderTiles(data) {
   const s = data.sample || {};
   const f = new Map((data.fields || []).map((x) => [x.field, x.value]));
   const tiles = [
-    ["Zone 1", fmtNum(s.zone1_temp, 1, "°F"), `setpoint ${fmtNum(s.setpoint, 0, "°F")}`],
-    ["Zone 2", fmtNum(s.zone2_temp, 1, "°F"),
-      f.has("setpoint2") ? `setpoint ${fmtNum(f.get("setpoint2"), 0, "°F")}` : ""],
+    ["Zone 1", fmtNum(s.zone1_temp, 1, "°F"), `setpoint ${fmtNum(s.setpoint, 0, "°F")} - trust this one`],
+    // Zone 2's own setpoint tag is not what the oven actually controls to -
+    // confirmed 2026-08-27: Zone 2's real temperature tracks Zone 1's
+    // setpoint, not its own (which read 305°F while Zone 2 was actually
+    // sitting at 365°F, matching Zone 1's 365°F target). Showing Zone 2's
+    // setpoint here would just be showing a number nothing is following.
+    ["Zone 2", fmtNum(s.zone2_temp, 1, "°F"), "tracks Zone 1's setpoint, not its own"],
     ["Load temp", fmtNum(s.load_temp_mean, 1, "°F"),
       s.load_temp_valid_count
         ? `${fmtNum(s.load_temp_min, 0)}–${fmtNum(s.load_temp_max, 0)} across ${s.load_temp_valid_count} probes`
         : "no valid probes"],
-    ["Burner 1", fmtNum(s.zone1_burner, 0, "%"), f.get("burner1_flame_on") ? "flame on" : "flame off"],
-    ["Burner 2", fmtNum(s.zone2_burner, 0, "%"), f.get("burner2_flame_on") ? "flame on" : "flame off"],
+    // On/off, not the raw SCALED_CONTROL_VARIABLE - that tag is not a 0-100
+    // percentage (observed live at 599 and 1198, i.e. not %), and showing it
+    // as one was actively misleading. MAIN_FLAME_ON is a clean, direct bool.
+    // The raw number is still visible in the tag monitor table below.
+    burnerTile("Burner 1", f.get("burner1_flame_on"), f.get("burner1_pilot_on")),
+    burnerTile("Burner 2", f.get("burner2_flame_on"), f.get("burner2_pilot_on")),
     ["Cycle", f.get("cycle_active") ? "RUNNING" : "not running",
       typeof s.cycle_time_left_min === "number"
         ? `load time ${(s.cycle_time_left_min / 60).toFixed(1)}h` : ""],
     ["Exhaust", fmtNum(s.exhaust_fan_active, 0, " Hz"), "VFD output frequency"],
+    doorsTile(s),
   ];
   document.getElementById("tile-grid").innerHTML = tiles.map(([label, value, sub]) => `
     <div class="tile">

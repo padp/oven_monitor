@@ -108,29 +108,45 @@ at 2192.0 as invalid rather than as a reading.
   `.RUNNING`, `.FULL_UP_LIMIT_SWITCH`, `.FULL_DOWN_LIMIT_SWITCH`, `.SAFETY_SW_ON`,
   `.OPEN_SELSW`, `.CLOSE_SELSW`, `.SAFETY_PULL_SWITCH_ON`
 
-## Open question: several permissive/limit bits appear active-low
+## Door polarity - CONFIRMED 2026-08-27
 
-**Do not encode any of these booleans until this is settled** - guessing wrong either
-invents faults that do not exist or hides real ones.
+`OVEN_ENTRANCE_DOOR.FULL_DOWN_LIMIT_SWITCH` / `OVEN_EXIT_DOOR.FULL_DOWN_LIMIT_SWITCH` are
+wired **normally-closed** - the raw bit reads inverted relative to what its name suggests.
+Confirmed by two independent real-world checks, on different days, with the door in
+different physical states, both correctly predicted by the same inversion:
 
-Read at 2026-08-26 ~08:40 with the oven cold, idle, and (per the operator) **doors open**:
+| Date | Raw reads | Physical reality (operator-confirmed) | Literal reading | Inverted reading |
+|---|---|---|---|---|
+| 2026-08-26 | `True` | doors **open** | closed (wrong) | open (correct) |
+| 2026-08-27 | `False` | doors **closed** (cycle running) | open (wrong) | closed (correct) |
+
+The literal, non-inverted reading of the tag name is wrong both times; the inverted
+reading is right both times. This is applied in `api/store_sqlite.py` /
+`api/store_mongo.py` (`_door_closed()`) as derived `entrance_door_closed` /
+`exit_door_closed` fields, surfaced in the dashboard's Doors tile. The raw
+`entrance_door_down` / `exit_door_down` fields are never modified anywhere in
+storage - only this one read-time derivation applies the correction. See
+`collector/config.py`'s `CONFIRMED_ACTIVE_LOW`.
+
+## Still open: other suspected active-low bits
+
+**Do not encode any of these until confirmed** - guessing wrong either invents faults
+that do not exist or hides real ones. Unlike the doors above, none of these have been
+checked against an independently-known real-world state yet.
+
+Read at 2026-08-26 ~08:40 with the oven cold and idle:
 
 | Tag | Reads | Contradiction |
 |---|---|---|
-| `OVEN_ENTRANCE_DOOR.FULL_DOWN_LIMIT_SWITCH` | True | operator says doors are open, i.e. not down |
-| `OVEN_EXIT_DOOR.FULL_DOWN_LIMIT_SWITCH` | True | same |
 | `BURNER_1/2.BURNER_AT_HIGH_FIRE` | True | flame off, firing rate 0 |
 | `BURNER_1/2.HIGH_LIMIT_OK` | False | no high-temperature fault set |
 | `OVEN_AUTO_MANUAL.OVEN_PLC_OK` | False | the PLC is plainly fine - it answered the read |
 
-One hypothesis explains all five: these inputs are wired **normally-closed** (fail-safe,
-which is conventional for safety and permissive circuits), so the bit reads inverted
-relative to how its name reads. Under that reading everything lines up - the doors are
-not at the down limit, the burners are not at high fire, the high limit is fine, the PLC
-is fine.
-
-It does **not** cleanly resolve the burner-2 question below, so it is a hypothesis to
-confirm at the HMI, not an established fact.
+These are consistent with the same normally-closed pattern the doors turned out to have,
+but that is circumstantial - a matching pattern, not independent confirmation. Neither
+`BURNER_AT_HIGH_FIRE` nor `HIGH_LIMIT_OK` is currently polled by the collector at all
+(never added as canonical fields). `OVEN_PLC_OK` is polled (as `power_feed`) and remains
+in `collector/config.py`'s `ACTIVE_LOW_SUSPECTS`, flagged but uncorrected.
 
 ## Burner 2 - possibly out of service
 

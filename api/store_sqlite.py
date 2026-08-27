@@ -16,9 +16,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from collector import config  # noqa: E402
 
 # How many poll intervals may pass before the newest sample is considered
-# stale. Two gives one missed poll of slack before the dashboard starts
-# claiming the collector is down.
-STALE_AFTER_S = config.POLL_INTERVAL_S * 2.5
+# stale. Two-and-a-half gives some slack for a missed poll before the
+# dashboard starts claiming the collector is down.
+#
+# Plus a flat allowance on top for clock drift: the poller host's system
+# clock has been observed running a couple of minutes behind true time
+# (2026-08-27), and syncing it isn't straightforward - it's a domain-joined
+# machine where time sync is managed by the org's policy, not a local
+# Settings toggle. Age is computed as (this process's clock) - (the
+# collector's own clock at write time), so that drift shows up directly as
+# apparent staleness even when the collector is polling perfectly on
+# schedule. 5 minutes covers the observed drift with real margin.
+CLOCK_DRIFT_ALLOWANCE_S = 5 * 60
+STALE_AFTER_S = config.POLL_INTERVAL_S * 2.5 + CLOCK_DRIFT_ALLOWANCE_S
 
 
 def _connect():
@@ -120,6 +130,8 @@ def current(oven_id):
             "zone1_temp": row["zone1_temp"],
             "zone2_temp": row["zone2_temp"],
             "setpoint": row["setpoint"],
+            "entrance_door_closed": _door_closed(snapshot, "entrance"),
+            "exit_door_closed": _door_closed(snapshot, "exit"),
             "zone1_burner": row["zone1_burner"],
             "zone2_burner": row["zone2_burner"],
             "cycle_time_left_min": row["cycle_time_left_min"],
@@ -207,6 +219,20 @@ def _value_type(value):
     if value is None:
         return "null"
     return "other"
+
+
+def _door_closed(snapshot, side):
+    """True/False/None for whether a door is actually closed.
+
+    side: "entrance" or "exit". The raw {side}_door_down field is confirmed
+    wired normally-closed (see config.CONFIRMED_ACTIVE_LOW) - invert it to
+    get the real state. The raw field itself is untouched in `fields`; this
+    is purely a derived value for display.
+    """
+    raw = snapshot.get(f"{side}_door_down")
+    if raw is None or not isinstance(raw, (bool, int)):
+        return None
+    return not bool(raw)
 
 
 def _probe_valid(value):

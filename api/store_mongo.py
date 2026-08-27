@@ -16,7 +16,13 @@ from datetime import datetime, timedelta, timezone
 from collector import config as collector_config
 from .db import get_db
 
-STALE_AFTER_S = collector_config.POLL_INTERVAL_S * 2.5
+# See the identical constant in store_sqlite.py for the full reasoning: a
+# poll-interval-based allowance plus a flat 5-minute buffer for the poller
+# host's observed clock drift (its system clock runs a couple of minutes
+# behind true time, and syncing it is managed by org policy, not something
+# fixable locally).
+CLOCK_DRIFT_ALLOWANCE_S = 5 * 60
+STALE_AFTER_S = collector_config.POLL_INTERVAL_S * 2.5 + CLOCK_DRIFT_ALLOWANCE_S
 
 
 def _parse_ts(value):
@@ -89,11 +95,15 @@ def current(oven_id):
 
     return {
         "oven": oven_meta,
-        "sample": {k: row.get(k) for k in (
-            "ts", "state", "reason", "zone1_temp", "zone2_temp", "setpoint",
-            "zone1_burner", "zone2_burner", "cycle_time_left_min",
-            "exhaust_fan_active", "load_temp_min", "load_temp_mean",
-            "load_temp_max", "load_temp_valid_count")},
+        "sample": {
+            **{k: row.get(k) for k in (
+                "ts", "state", "reason", "zone1_temp", "zone2_temp", "setpoint",
+                "zone1_burner", "zone2_burner", "cycle_time_left_min",
+                "exhaust_fan_active", "load_temp_min", "load_temp_mean",
+                "load_temp_max", "load_temp_valid_count")},
+            "entrance_door_closed": _door_closed(snapshot, "entrance"),
+            "exit_door_closed": _door_closed(snapshot, "exit"),
+        },
         "stale": age is None or age > STALE_AFTER_S,
         "age_s": age,
         "poll_interval_s": collector_config.POLL_INTERVAL_S,
@@ -160,6 +170,20 @@ def _value_type(value):
     if value is None:
         return "null"
     return "other"
+
+
+def _door_closed(snapshot, side):
+    """True/False/None for whether a door is actually closed.
+
+    side: "entrance" or "exit". The raw {side}_door_down field is confirmed
+    wired normally-closed (see collector_config.CONFIRMED_ACTIVE_LOW) -
+    invert it to get the real state. The raw field itself is untouched in
+    `fields`; this is purely a derived value for display.
+    """
+    raw = snapshot.get(f"{side}_door_down")
+    if raw is None or not isinstance(raw, (bool, int)):
+        return None
+    return not bool(raw)
 
 
 def _probe_valid(value):

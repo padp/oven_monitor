@@ -64,10 +64,17 @@
         </table>
       </div>
       <p class="footnote">
-        Values are shown exactly as the PLC reported them &mdash; no polarity correction and no
-        substituted defaults. Rows marked <span class="flag">polarity?</span> are bits whose
-        wiring is still unconfirmed, so a <code>true</code> there does not yet mean what the tag
-        name suggests. See <code>reference/oven_91_tag_map.md</code>.
+        Values in this table are shown exactly as the PLC reported them &mdash; no polarity
+        correction and no substituted defaults. Rows marked <span class="flag">polarity?</span>
+        are bits whose wiring is still unconfirmed (currently just <code>power_feed</code>), so a
+        <code>true</code> there does not yet mean what the tag name suggests. The door limit
+        switches (<code>entrance_door_down</code> / <code>exit_door_down</code>) were the same
+        kind of unconfirmed bit until 2026-08-27, when two independent real-world checks on
+        different days - doors physically open with the raw bit reading <code>true</code>, then
+        physically closed with it reading <code>false</code> - confirmed they are wired
+        normally-closed. That correction is applied only in the <strong>Doors</strong> tile above,
+        which shows the true CLOSED/OPEN state; the raw <code>*_door_down</code> fields here stay
+        unmodified. See <code>reference/oven_91_tag_map.md</code>.
       </p>
     </section>
 
