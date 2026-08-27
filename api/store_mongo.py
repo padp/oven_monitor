@@ -162,6 +162,35 @@ def states(oven_id, hours=24):
     }
 
 
+# See the identical constant in store_sqlite.py: plex_sync.py runs every
+# 120s and a cycle can take ~20s+ (Plex latency, occasional fresh login),
+# much slower than the PLC's 30s loop, so this needs its own allowance.
+PLEX_STALE_AFTER_S = 10 * 60
+
+
+def current_plex_load(oven_id):
+    """Latest Plex job-context lookup for one oven, or None if plex_sync.py
+    has never run (or never found a plex_workcenter_key configured) for it.
+    """
+    row = get_db().plex_loads.find_one(
+        {"oven_id": oven_id}, sort=[("ts", -1)], projection={"_id": False}
+    )
+    if row is None:
+        return None
+
+    ts = _parse_ts(row.get("ts"))
+    age = (datetime.now(timezone.utc) - ts).total_seconds() if ts else None
+
+    keep = ("ts", "confirmed", "furnace_load_no", "furnace_load_status",
+            "operation_code", "temperature", "actual_start_time", "actual_end_time",
+            "serial_no", "job_no", "part_no", "part_name", "quantity")
+    out = {k: row.get(k) for k in keep}
+    out["confirmed"] = bool(out["confirmed"])
+    out["stale"] = age is None or age > PLEX_STALE_AFTER_S
+    out["age_s"] = age
+    return out
+
+
 def _value_type(value):
     if isinstance(value, bool):
         return "bool"

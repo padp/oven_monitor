@@ -142,20 +142,21 @@ percentage to mean more than that.
 
 ### Running it for real
 
-Both `run_collector.py` and `run_publisher.py` run persistently on the same host as
-the legacy poller, via **Windows Task Scheduler** - not as Windows services. Each is
-a scheduled task running `python.exe run_collector.py` / `python.exe run_publisher.py`
-with the working directory set to the project root, triggered at startup (and/or on a
-"repeat indefinitely" schedule), with "if the task is already running, do not start a
-new instance" set so a slow-to-exit previous run is never doubled up.
+`run_collector.py`, `run_publisher.py`, and `run_plex_sync.py` all run persistently on
+the same host as the legacy poller, via **Windows Task Scheduler** - not as Windows
+services. Each is a scheduled task running `python.exe run_<name>.py` with the working
+directory set to the project root, triggered at startup (and/or on a "repeat
+indefinitely" schedule), with "if the task is already running, do not start a new
+instance" set so a slow-to-exit previous run is never doubled up.
 
-Before wiring either up as a scheduled task, run its `--check` flag by hand once -
+Before wiring any of them up as a scheduled task, run its `--check` flag by hand once -
 imports everything, touches nothing, and prints what it resolved (DB path, enabled
-ovens, and for the publisher, whether `secret/oven_publisher.txt` is present and
-valid):
+ovens, publisher credentials, or - for plex_sync - which ovens have a
+`plex_workcenter_key` configured and whether the shared Plex login actually works):
 
     python run_collector.py --check
     python run_publisher.py --check
+    python run_plex_sync.py --check
 
 This is the same check the (unused) `service/` installer runs automatically -
 catching a bad import or missing credentials this way is a lot faster than watching a
@@ -168,9 +169,10 @@ task's environment (or in the task's action, e.g. `cmd /c "set OVEN_DB_DIR=C:\Ov
 to a local path.
 
 **Point the scheduled task at the project by its full UNC path, never a mapped drive
-letter** (`\\file1\User\Extrusion DB\Large Oven Uptime Monitoring`, not `T:\...`). Both
-scripts derive every other path - `secret/oven_publisher.txt`, the checkpoint DB, the
-default `db/` location - from wherever they were actually launched from
+letter** (`\\file1\User\Extrusion DB\Large Oven Uptime Monitoring`, not `T:\...`). All
+three scripts derive every other path - `secret/oven_publisher.txt`, the checkpoint DB,
+the shared Plex credentials one level up, the default `db/` location - from wherever
+they were actually launched from
 (`os.path.abspath(__file__)`), so whatever path style the task's Action uses is the one
 that propagates everywhere. Mapped drives are tied to the interactive logon session
 that created them; a task running as a service account, "whether user is logged on or
@@ -235,7 +237,7 @@ temperatures come from `OVEN_AUX_THERMOCOUPLE`'s eleven probes; and several
 permissive/limit booleans appear to be wired normally-closed, so their names read
 backwards.
 
-## Plex integration (client module only, not yet wired in)
+## Plex integration - job context on the dashboard
 
 `collector/plex_login.py` + `collector/plex.py` are a reusable client for pulling real
 production context (job/part/serial numbers, actual cycle temperature and timing) from
@@ -259,11 +261,35 @@ other project reading it picks up the fresh value on its next call. Both files a
 outside this repo's directory entirely, so they can never be committed here by
 accident. To bootstrap a fresh login by hand: `python -m collector.plex_login`.
 
-Deliberately **not** wired into the poll loop, storage schema, or the dashboard yet -
-this is just the callable client. `WorkcenterKey "58085"` is confirmed as
-`PAD-Small Aging Oven`; a fuller integration (a scheduled sync writing job/part
-context alongside PLC samples, surfaced on the dashboard) is a natural next step but
-not built yet.
+### The full pipeline
+
+Plex cannot be called from Render (no path to the LAN's shared credentials or to
+`cloud.plex.com` from Render's network) or on every dashboard refresh (a real call
+measures 2-20s, and the dashboard polls every 5s) - so job context follows the same
+shape as PLC telemetry:
+
+    collector/plex_sync.py  (poller host, every 120s)
+      -> get_current_load() per oven with a plex_workcenter_key
+      -> get_container() on one of that load's serials for part/quantity
+      -> db/oven_monitor.db: plex_loads table
+    -> publisher.py forwards new plex_loads rows, same as samples/state_events
+    -> api/: GET /api/oven/<id>/job
+    -> docs/: "Current job" card
+
+`collector/config.py`'s `OVENS[...]["plex_workcenter_key"]` is what enables this per
+oven - `"58085"` (small, `PAD-Small Aging Oven`) and `"58084"` (large,
+`PAD-Large Aging Oven"`), both confirmed live.
+
+Every load carries a `confirmed` flag: `True` when Plex has a load with
+`FurnaceLoadStatusKey` "Started" for that oven (the operator actually toggled it),
+`False` when nothing is marked Started and this is the most-recently-started load
+instead - which may already be finished. The dashboard always shows which one it got,
+via a `Plex-confirmed` / `unconfirmed guess` badge - never presented as fact when it
+is a guess.
+
+Run `python run_plex_sync.py` as a third scheduled task alongside the collector and
+publisher (see "Running it for real" below) - same UNC-path and `--check`-first
+guidance applies.
 
 ## Conventions
 

@@ -61,6 +61,25 @@ CREATE TABLE IF NOT EXISTS state_events (
     reason TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_state_events_oven ON state_events(oven_id, ts_start);
+
+CREATE TABLE IF NOT EXISTS plex_loads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    oven_id TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    confirmed INTEGER NOT NULL,
+    furnace_load_no TEXT,
+    furnace_load_status TEXT,
+    operation_code TEXT,
+    temperature REAL,
+    actual_start_time TEXT,
+    actual_end_time TEXT,
+    serial_no TEXT,
+    job_no TEXT,
+    part_no TEXT,
+    part_name TEXT,
+    quantity REAL
+);
+CREATE INDEX IF NOT EXISTS idx_plex_loads_oven_ts ON plex_loads(oven_id, ts);
 """
 
 # Canonical fields promoted to real columns because they are what almost
@@ -105,6 +124,32 @@ class Storage:
         placeholders = ",".join("?" * len(cols))
         self._conn.execute(
             "INSERT INTO samples (%s) VALUES (%s)" % (",".join(cols), placeholders),
+            values,
+        )
+        self._conn.commit()
+
+    # --- Plex job context -----------------------------------------------
+
+    def insert_plex_load(self, oven_id, ts, load):
+        """Record one Plex lookup result.
+
+        `load` is the flattened dict collector/plex_sync.py builds from
+        get_current_load() + get_container() - see there for the shape.
+        Appended, like samples, rather than upserted in place: a history of
+        what was running (or guessed to be running) over time is exactly
+        the kind of thing worth keeping, and it costs nothing at this
+        polling rate (every couple of minutes, not every 30s).
+        """
+        cols = [
+            "oven_id", "ts", "confirmed", "furnace_load_no", "furnace_load_status",
+            "operation_code", "temperature", "actual_start_time", "actual_end_time",
+            "serial_no", "job_no", "part_no", "part_name", "quantity",
+        ]
+        values = [oven_id, ts.isoformat(), int(load.get("confirmed", False))]
+        values += [load.get(c) for c in cols[3:]]
+        placeholders = ",".join("?" * len(cols))
+        self._conn.execute(
+            "INSERT INTO plex_loads (%s) VALUES (%s)" % (",".join(cols), placeholders),
             values,
         )
         self._conn.commit()

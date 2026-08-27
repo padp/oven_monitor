@@ -259,6 +259,44 @@ function renderProbes(data) {
     : "All probes reporting.";
 }
 
+function renderJob(job) {
+  const el = document.getElementById("job-content");
+  if (!job) {
+    el.innerHTML = '<div class="attention-detail">No Plex data yet - plex_sync.py has not reported for this oven.</div>';
+    return;
+  }
+
+  const badge = job.confirmed
+    ? '<span class="flag ok">Plex-confirmed</span>'
+    : '<span class="flag">unconfirmed guess</span>';
+  const staleNote = job.stale
+    ? `<div class="banner" style="margin-top:0.6rem;">Plex data last refreshed ${fmtAge(job.age_s)} - showing the last known job.</div>`
+    : "";
+
+  const part = job.part_no
+    ? `${job.part_no}${job.part_name ? " &mdash; " + job.part_name : ""}`
+    : "&ndash;";
+
+  el.innerHTML = `
+    <div class="status-row" style="margin-bottom: 0.75rem;">
+      ${badge}
+      <div style="font-weight: 700; font-size: 16px;">${part}</div>
+    </div>
+    <div class="tile-grid">
+      <div class="tile"><div class="tile-label">Job No</div><div class="tile-value">${job.job_no || "&ndash;"}</div></div>
+      <div class="tile"><div class="tile-label">Quantity</div><div class="tile-value">${fmtNum(job.quantity, 0)}</div></div>
+      <div class="tile"><div class="tile-label">Furnace Load</div><div class="tile-value">${job.furnace_load_no || "&ndash;"}</div><div class="tile-sub">${job.furnace_load_status || ""}</div></div>
+      <div class="tile"><div class="tile-label">Target Temp</div><div class="tile-value">${fmtNum(job.temperature, 0, "°F")}</div></div>
+    </div>
+    ${staleNote}
+    <p class="footnote">
+      "unconfirmed guess" means Plex has no load marked <strong>Started</strong> for this oven right
+      now, so this is the most-recently-started load instead - it may already be finished. A
+      <span class="flag ok">Plex-confirmed</span> badge means the operator actually toggled
+      "Started" on this load in Plex.
+    </p>`;
+}
+
 function renderTags(data) {
   const filter = document.getElementById("tag-filter").value.trim().toLowerCase();
   const onlyFlagged = document.getElementById("only-flagged").checked;
@@ -321,9 +359,10 @@ async function refresh() {
   const base = apiBase();
   const oven = selectedOven();
   try {
-    const [cur, st] = await Promise.all([
+    const [cur, st, jobResp] = await Promise.all([
       fetch(`${base}/api/oven/${oven}/current`).then((r) => r.json()),
       fetch(`${base}/api/oven/${oven}/states?hours=24`).then((r) => r.json()),
+      fetch(`${base}/api/oven/${oven}/job`).then((r) => r.json()),
     ]);
     if (cur.error) throw new Error(cur.error);
     latest = cur;
@@ -333,6 +372,7 @@ async function refresh() {
     renderProbes(cur);
     renderTags(cur);
     renderStates(st);
+    renderJob(jobResp.load);
   } catch (err) {
     document.getElementById("last-updated").textContent = "API unreachable";
     const banner = document.getElementById("stale-banner");

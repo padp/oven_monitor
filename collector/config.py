@@ -215,6 +215,10 @@ OVENS = {
         # oven reports the cycle it can see and stays quiet about
         # inferred stalls until the data earns it.
         "implicit_stall_fault": False,
+        # Plex's WorkcenterKey for this oven - see collector/plex.py's
+        # WORKCENTER_SMALL_OVEN. Used by collector/plex_sync.py to look up
+        # what job is actually running, alongside the PLC telemetry.
+        "plex_workcenter_key": "58085",
     },
     "large": {
         "id": "large",
@@ -233,6 +237,7 @@ OVENS = {
         # historical snapshots through this detector reproduces exactly.
         "cycle_active_field": None,
         "implicit_stall_fault": True,
+        "plex_workcenter_key": "58084",
     },
 }
 

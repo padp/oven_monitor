@@ -211,6 +211,47 @@ def states(oven_id, hours=24):
     }
 
 
+# plex_sync.py runs every 120s and a cycle itself can take ~20s+ (Plex
+# latency, occasionally a fresh login) - much slower than the PLC's 30s
+# loop, so this needs its own, more generous staleness allowance rather
+# than reusing STALE_AFTER_S.
+PLEX_STALE_AFTER_S = 10 * 60
+
+
+def current_plex_load(oven_id):
+    """Latest Plex job-context lookup for one oven, or None if plex_sync.py
+    has never run (or never found a plex_workcenter_key configured) for it.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM plex_loads WHERE oven_id = ? ORDER BY id DESC LIMIT 1",
+            (oven_id,),
+        ).fetchone()
+    if row is None:
+        return None
+
+    ts = _parse_ts(row["ts"])
+    age = (datetime.now(timezone.utc) - ts).total_seconds() if ts else None
+
+    return {
+        "ts": row["ts"],
+        "confirmed": bool(row["confirmed"]),
+        "furnace_load_no": row["furnace_load_no"],
+        "furnace_load_status": row["furnace_load_status"],
+        "operation_code": row["operation_code"],
+        "temperature": row["temperature"],
+        "actual_start_time": row["actual_start_time"],
+        "actual_end_time": row["actual_end_time"],
+        "serial_no": row["serial_no"],
+        "job_no": row["job_no"],
+        "part_no": row["part_no"],
+        "part_name": row["part_name"],
+        "quantity": row["quantity"],
+        "stale": age is None or age > PLEX_STALE_AFTER_S,
+        "age_s": age,
+    }
+
+
 def _value_type(value):
     if isinstance(value, bool):
         return "bool"

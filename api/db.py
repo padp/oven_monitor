@@ -36,3 +36,5 @@ def ensure_indexes():
     db.samples.create_index([("oven_id", 1), ("ts", -1)])
     db.state_events.create_index("source_id", unique=True)
     db.state_events.create_index([("oven_id", 1), ("ts_start", 1)])
+    db.plex_loads.create_index("source_id", unique=True)
+    db.plex_loads.create_index([("oven_id", 1), ("ts", -1)])

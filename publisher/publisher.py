@@ -29,7 +29,7 @@ def _source_id(table_name, row):
     timestamp is unique by construction - one sample per oven per poll, one
     state segment per oven per start instant - and survives a rebuild.
     """
-    stamp = row["ts"] if table_name == "samples" else row["ts_start"]
+    stamp = row["ts_start"] if table_name == "state_events" else row["ts"]
     return "%s:%s" % (row["oven_id"], stamp)
 
 
@@ -71,7 +71,7 @@ def _next_checkpoint(table_name, rows, last_id):
 def sync_once(conn, checkpoint, api_url, api_key):
     payload = {}
     next_ids = {}
-    for table_name in ("samples", "state_events"):
+    for table_name in ("samples", "state_events", "plex_loads"):
         last_id = checkpoint.last_id(table_name)
         rows = _fetch(conn, table_name, last_id, config.BATCH_LIMIT)
         if not rows:

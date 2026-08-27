@@ -34,7 +34,7 @@ CORS(app)
 # Tables the publisher is allowed to write. An explicit allowlist rather
 # than trusting the request body's keys, so a malformed or hostile payload
 # cannot create arbitrary collections.
-INGESTABLE = ("samples", "state_events")
+INGESTABLE = ("samples", "state_events", "plex_loads")
 
 if os.environ.get("SQL_PASS"):
     # Skipped when SQL_PASS is not set (local SQLite mode, or Render's build
@@ -114,6 +114,15 @@ def oven_history(oven_id):
 def oven_states(oven_id):
     hours = request.args.get("hours", default=24, type=float)
     return jsonify(store.states(oven_id, hours=hours))
+
+
+@app.route("/api/oven/<oven_id>/job")
+def oven_job(oven_id):
+    """Current Plex job context, synced separately from PLC telemetry by
+    plex_sync.py (see there for why - Plex latency and dashboard refresh
+    rate are incompatible with calling it live on every request)."""
+    load = store.current_plex_load(oven_id)
+    return jsonify({"load": load})
 
 
 def serve(host="0.0.0.0", port=8000):
