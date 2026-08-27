@@ -14,6 +14,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from collector import config as collector_config
+from . import cycle_time
 from .db import get_db
 
 # See the identical constant in store_sqlite.py for the full reasoning: a
@@ -103,6 +104,10 @@ def current(oven_id):
                 "load_temp_max", "load_temp_valid_count")},
             "entrance_door_closed": _door_closed(snapshot, "entrance"),
             "exit_door_closed": _door_closed(snapshot, "exit"),
+            "cycle_time_remaining_computed_min": cycle_time.compute_remaining_min(
+                snapshot, row.get("state"),
+                _current_step_anchor(oven_id, snapshot.get("current_step")),
+                datetime.now(timezone.utc)),
         },
         "stale": age is None or age > STALE_AFTER_S,
         "age_s": age,
@@ -215,6 +220,21 @@ def _door_closed(snapshot, side):
     if raw is None or not isinstance(raw, (bool, int)):
         return None
     return not bool(raw)
+
+
+def _current_step_anchor(oven_id, current_step):
+    """steady_reached_ts for the step_events document matching the CURRENT
+    step - see the identical function in store_sqlite.py for why a
+    mismatched step_number must return None rather than a stale anchor.
+    """
+    if current_step is None:
+        return None
+    row = get_db().step_events.find_one(
+        {"oven_id": oven_id}, sort=[("ramp_start_ts", -1)], projection={"_id": False}
+    )
+    if row is None or row.get("step_number") != current_step or not row.get("steady_reached_ts"):
+        return None
+    return _parse_ts(row["steady_reached_ts"])
 
 
 def _probe_valid(value):

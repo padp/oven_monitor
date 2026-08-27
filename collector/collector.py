@@ -41,6 +41,10 @@ class OvenPoller:
         self.plc = PlcClient(oven["ip"])
         self.detector = Detector(oven)
         self.consecutive_errors = 0
+        # For detecting a fresh non-RUNNING -> RUNNING transition, which
+        # record_step() needs to know a new cycle has begun - see there for
+        # why step_number alone cannot tell two different loads apart.
+        self._last_state = None
 
     def poll(self, ts, storage):
         tag_names = list(self.oven["tags"].keys())
@@ -53,7 +57,34 @@ class OvenPoller:
         state, reason = self.detector.evaluate(snapshot, summarize_load_temps(load_temps))
         storage.insert_sample(self.oven_id, ts, snapshot, state, reason, load_temps)
         storage.record_state(self.oven_id, ts, state, reason)
+
+        new_cycle = state == "RUNNING" and self._last_state != "RUNNING"
+        self._last_state = state
+        if state == "RUNNING" and "recipe_step_count" in snapshot:
+            self._record_step(storage, ts, snapshot, new_cycle)
+
         return state, reason
+
+    def _record_step(self, storage, ts, snapshot, new_cycle):
+        """Feed the current recipe step to storage.record_step(), if the
+        step index is one this oven actually has recipe fields for.
+
+        Only ever called for an oven whose tags map recipe_step_count etc.
+        (currently just the small oven - the large oven's equivalent
+        S1-S4 tags are not wired in yet, unvalidated against a live cycle).
+        """
+        step = snapshot.get("current_step")
+        if step is None or not (0 <= step <= 4):
+            return
+        storage.record_step(
+            self.oven_id, ts, step_number=step,
+            target_temp=snapshot.get("recipe_step%d_temp" % step),
+            ramp_rate=snapshot.get("recipe_step%d_ramp_rate" % step),
+            soak_duration_min=_hours_to_minutes(snapshot.get("recipe_step%d_soak_hr" % step)),
+            at_steady=bool(snapshot.get("burner1_at_steady_temp")),
+            actual_temp=snapshot.get("zone1_temp"),
+            new_cycle=new_cycle,
+        )
 
     def _to_snapshot(self, raw):
         """PLC tag names -> canonical field names, with unit scaling.
@@ -87,6 +118,10 @@ class OvenPoller:
             pass
 
 
+def _hours_to_minutes(hours):
+    return hours * 60.0 if isinstance(hours, (int, float)) and not isinstance(hours, bool) else None
+
+
 def run():
     ovens = config.enabled_ovens()
     if not ovens:
@@ -95,6 +130,7 @@ def run():
 
     storage = Storage()
     storage.resume_open_states()
+    storage.resume_open_steps()
     pollers = [OvenPoller(o) for o in ovens]
 
     for p in pollers:

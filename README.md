@@ -237,6 +237,51 @@ temperatures come from `OVEN_AUX_THERMOCOUPLE`'s eleven probes; and several
 permissive/limit booleans appear to be wired normally-closed, so their names read
 backwards.
 
+## Cycle time remaining - computed, not read from the PLC
+
+Confirmed live 2026-08-27: neither oven has a PLC tag that live-counts remaining
+cycle time. `HR_LOAD_TIME_LEFT_TO_MMI` and `STEP_TIME_ELAPSED_TO_MMI` were read 40s
+apart during an actively-ramping cycle, with the real temperature clearly changing,
+and neither one moved - they are one-time setpoints/snapshots, not countdowns. This
+matches what the user described having done by hand before this collector existed:
+calculate it from the active recipe instead.
+
+The small oven's live recipe (`OVEN_RECIPE_RUN` - a 5-slot array UDT, matching
+`STEP_1`..`STEP_5`) gives three numbers per step: `.SP_TEMP` (target °F),
+`.RAMP_RATE` (seconds per degree F), `.SOAK_TIME` (hours to dwell once at
+target). `api/cycle_time.py`'s `compute_remaining_min()` uses those plus the live
+actual temperature and `BURNER_1_AT_STEADY_TEMP` (ramp-finished/soak-started) to
+compute remaining time for the current step, plus full ramp+soak for any steps
+still ahead - only when the oven's detected state is `RUNNING` (an idle, cooling
+oven's recipe fields still hold whatever the *last* cycle used, which would
+otherwise produce a large bogus number).
+
+**The one thing that has to be persisted, not just held in collector memory:** the
+moment soak begins. `collector/storage.py`'s `record_step()` writes this to a new
+`step_events` table (mirrors `state_events`' lifecycle - a row opens when a step
+starts, gets its `steady_reached_ts` filled in exactly once when steady temp is
+reached, then never changes again) precisely so a collector restart mid-soak loses
+nothing: the calculation reads the anchor fresh from the database on every request,
+not from whatever the current process happens to remember. `publisher.py`'s
+per-table "resend while still open" handling (previously special-cased just for
+`state_events`) is now a small `MUTABLE_TABLES` mapping covering both.
+
+Verified with a synthetic poll sequence (ramp -> steady reached -> simulated
+collector restart mid-soak -> a later, unrelated cycle reusing the same step
+number) rather than a live cycle end-to-end - the oven was between cycles
+throughout this work. The formula itself is separately unit-tested against known
+values (ramping, soaking, soak-overrun, multi-step, no-active-step).
+
+**Only wired up for the small oven.** The large oven has the same three
+parameters under a completely different naming scheme (`S1_CYC_RAMP_SPT` /
+`S1_CYC_RAMP_SPT_MIN` (minutes, not hours) / `S1_AR_RAMP` / `S1_SR_RAMP` for up to
+4 steps, `USE_SECS_PER_DEG_RAMP_MATH` literally confirming the same
+seconds-per-degree convention) - confirmed to exist, but the oven was idle
+throughout this investigation, so real values couldn't be validated, and it is
+unclear yet whether `AR_RAMP` or `SR_RAMP` is the one that actually governs. Not
+wired into `LARGE_OVEN_TAGS` or `compute_remaining_min` until that's settled
+against a real cycle.
+
 ## Plex integration - job context on the dashboard
 
 `collector/plex_login.py` + `collector/plex.py` are a reusable client for pulling real

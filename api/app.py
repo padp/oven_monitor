@@ -34,7 +34,7 @@ CORS(app)
 # Tables the publisher is allowed to write. An explicit allowlist rather
 # than trusting the request body's keys, so a malformed or hostile payload
 # cannot create arbitrary collections.
-INGESTABLE = ("samples", "state_events", "plex_loads")
+INGESTABLE = ("samples", "state_events", "plex_loads", "step_events")
 
 if os.environ.get("SQL_PASS"):
     # Skipped when SQL_PASS is not set (local SQLite mode, or Render's build

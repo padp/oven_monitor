@@ -20,28 +20,35 @@ def _dict_rows(cur):
     return [dict(zip(columns, row)) for row in cur.fetchall()]
 
 
-def _source_id(table_name, row):
-    """A stable identity for a row, independent of local rowids.
+# Tables whose rows are MUTATED after insert: `open_column` is NULL while
+# the row is still open and gets filled in exactly once when it closes
+# (state_events.ts_end when a segment ends, step_events.steady_reached_ts
+# when ramp finishes and soak begins). A plain "id > last_id" sweep would
+# publish an open row once, with the open column null, and never correct
+# it once it closes - so both need the same "re-send anything still open,
+# every tick, until it closes" handling. `start_column` is the row's
+# natural per-instance key (the start of whatever span it represents) used
+# as the stable part of source_id, since raw SQLite ids are not stable
+# across a rebuilt local database.
+MUTABLE_TABLES = {
+    "state_events": {"open_column": "ts_end", "start_column": "ts_start"},
+    "step_events": {"open_column": "steady_reached_ts", "start_column": "ramp_start_ts"},
+}
 
-    Deliberately NOT the SQLite id: if the local DB is ever rebuilt (a
-    reinstall, a moved host, a corrupted file) ids restart from 1 and would
-    silently overwrite unrelated cloud documents. oven_id plus the row's own
-    timestamp is unique by construction - one sample per oven per poll, one
-    state segment per oven per start instant - and survives a rebuild.
-    """
-    stamp = row["ts_start"] if table_name == "state_events" else row["ts"]
+
+def _source_id(table_name, row):
+    """A stable identity for a row, independent of local rowids."""
+    spec = MUTABLE_TABLES.get(table_name)
+    stamp = row[spec["start_column"]] if spec else row["ts"]
     return "%s:%s" % (row["oven_id"], stamp)
 
 
 def _fetch(conn, table_name, last_id, limit):
-    if table_name == "state_events":
-        # state_events rows are MUTATED after insert: ts_end is filled in when
-        # the segment closes. A plain "id > last_id" sweep would publish the
-        # open segment once, with ts_end null, and never correct it - so the
-        # cloud would show every state as still running. Re-send anything still
-        # open, every tick, until it closes.
+    spec = MUTABLE_TABLES.get(table_name)
+    if spec:
         cur = conn.execute(
-            "SELECT * FROM state_events WHERE id > ? OR ts_end IS NULL ORDER BY id LIMIT ?",
+            "SELECT * FROM %s WHERE id > ? OR %s IS NULL ORDER BY id LIMIT ?"
+            % (table_name, spec["open_column"]),
             (last_id, limit),
         )
     else:
@@ -55,15 +62,16 @@ def _fetch(conn, table_name, last_id, limit):
 def _next_checkpoint(table_name, rows, last_id):
     """How far the checkpoint may safely advance.
 
-    For append-only tables, the highest id sent. For state_events, no further
-    than just below the oldest row that is still open - everything below that
-    is closed and final, while the open ones must keep being re-sent. Never
-    moves backwards.
+    For append-only tables, the highest id sent. For a mutable table, no
+    further than just below the oldest row that is still open - everything
+    below that is closed and final, while the open ones must keep being
+    re-sent. Never moves backwards.
     """
+    spec = MUTABLE_TABLES.get(table_name)
     sent_max = max(r["id"] for r in rows)
-    if table_name != "state_events":
+    if not spec:
         return max(sent_max, last_id)
-    open_ids = [r["id"] for r in rows if r.get("ts_end") is None]
+    open_ids = [r["id"] for r in rows if r.get(spec["open_column"]) is None]
     candidate = (min(open_ids) - 1) if open_ids else sent_max
     return max(candidate, last_id)
 
@@ -71,7 +79,7 @@ def _next_checkpoint(table_name, rows, last_id):
 def sync_once(conn, checkpoint, api_url, api_key):
     payload = {}
     next_ids = {}
-    for table_name in ("samples", "state_events", "plex_loads"):
+    for table_name in ("samples", "state_events", "plex_loads", "step_events"):
         last_id = checkpoint.last_id(table_name)
         rows = _fetch(conn, table_name, last_id, config.BATCH_LIMIT)
         if not rows:

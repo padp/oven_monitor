@@ -81,6 +81,19 @@ CREATE TABLE IF NOT EXISTS plex_loads (
     containers_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_plex_loads_oven_ts ON plex_loads(oven_id, ts);
+
+CREATE TABLE IF NOT EXISTS step_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    oven_id TEXT NOT NULL,
+    step_number INTEGER NOT NULL,
+    ramp_start_ts TEXT NOT NULL,
+    target_temp REAL,
+    ramp_rate REAL,
+    soak_duration_min REAL,
+    steady_reached_ts TEXT,
+    steady_reached_temp REAL
+);
+CREATE INDEX IF NOT EXISTS idx_step_events_oven ON step_events(oven_id, ramp_start_ts);
 """
 
 # Canonical fields promoted to real columns because they are what almost
@@ -106,6 +119,8 @@ class Storage:
         self._conn.commit()
         # Open state segment per oven, so two ovens don't share one.
         self._open_state = {}
+        # Open (still-ramping) recipe step per oven - see record_step().
+        self._open_step = {}
 
     def _migrate(self):
         """Add columns introduced after a db file already existed.
@@ -205,6 +220,83 @@ class Storage:
         ).fetchall()
         for row_id, oven_id, state in rows:
             self._open_state[oven_id] = {"id": row_id, "state": state}
+
+    # --- recipe steps ---------------------------------------------------
+    #
+    # A step_events row anchors the two moments the remaining-time
+    # calculation needs (see api/store_*.py's compute_cycle_remaining):
+    # ramp_start_ts (when this step began) and steady_reached_ts (when
+    # ramp finished and soak began - NULL until then). The row is written
+    # once and updated at most once more, then permanently done - the
+    # exact lifecycle state_events already has (ts_end NULL -> filled in
+    # once). The calculation reads steady_reached_ts fresh from the
+    # database on every request rather than from collector memory, so a
+    # collector restart mid-soak loses nothing: the anchor already
+    # written to disk is what "picking back up where we left off" means
+    # here - there is no separate recovery step needed for it.
+    #
+    # resume_open_steps() below exists only to stop a restart from
+    # inserting a DUPLICATE row for a step that was already mid-ramp -
+    # it has no bearing on soak recovery, which the database already
+    # handles by simply being the source of truth record_step() never
+    # needs to duplicate in memory.
+
+    def resume_open_steps(self):
+        """Re-attach to the most recent step_events row per oven, whether
+        it is still ramping or already closed (steady reached).
+
+        Resuming only the still-open rows is not enough: if the last row
+        was already CLOSED before a restart (soak had already begun) and
+        the next poll reports the same step_number with new_cycle=False,
+        record_step needs to recognize "this is that same, already-closed
+        step - nothing to do" rather than seeing no in-memory record at
+        all and wrongly inserting a duplicate row for a step that has not
+        actually restarted. Caught by testing a simulated restart
+        mid-soak, not assumed.
+        """
+        rows = self._conn.execute(
+            """SELECT id, oven_id, step_number, steady_reached_ts FROM step_events
+               WHERE id IN (SELECT MAX(id) FROM step_events GROUP BY oven_id)"""
+        ).fetchall()
+        for row_id, oven_id, step_number, steady_reached_ts in rows:
+            self._open_step[oven_id] = {
+                "id": row_id, "step_number": step_number,
+                "closed": steady_reached_ts is not None,
+            }
+
+    def record_step(self, oven_id, ts, step_number, target_temp, ramp_rate,
+                     soak_duration_min, at_steady, actual_temp, new_cycle):
+        """Track one recipe step's ramp-start and steady-reached timestamps.
+
+        new_cycle: True exactly when the caller detects a fresh
+        non-RUNNING -> RUNNING transition. Needed because step_number
+        alone is not a reliable "is this the same step instance" key - a
+        later, unrelated load can legitimately reuse the same step number
+        (most recipes seen so far are single-step), so relying on
+        step_number matching alone would wrongly keep appending to a step
+        from a load that already finished. new_cycle forces a fresh row
+        regardless of what step_number the new load happens to start on.
+        """
+        current = self._open_step.get(oven_id)
+        is_new = new_cycle or current is None or current["step_number"] != step_number
+        if is_new:
+            cur = self._conn.execute(
+                """INSERT INTO step_events
+                   (oven_id, step_number, ramp_start_ts, target_temp, ramp_rate, soak_duration_min)
+                   VALUES (?,?,?,?,?,?)""",
+                (oven_id, step_number, ts.isoformat(), target_temp, ramp_rate, soak_duration_min),
+            )
+            self._open_step[oven_id] = {"id": cur.lastrowid, "step_number": step_number, "closed": False}
+            self._conn.commit()
+            current = self._open_step[oven_id]
+
+        if not current.get("closed") and at_steady:
+            self._conn.execute(
+                "UPDATE step_events SET steady_reached_ts = ?, steady_reached_temp = ? WHERE id = ?",
+                (ts.isoformat(), actual_temp, current["id"]),
+            )
+            current["closed"] = True
+            self._conn.commit()
 
     # --- retention ----------------------------------------------------
 

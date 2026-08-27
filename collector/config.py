@@ -115,12 +115,54 @@ SMALL_OVEN_TAGS = {
     "ALARMS_PRESENT_TOTAL": "alarms_present_total",
 
     # Cycle / step progress.
+    #
+    # STEP_TIME_ELAPSED_TO_MMI / STEP_TIME_TO_MMI and cycle_time_left_min
+    # above are NOT live countdowns despite the names - confirmed live
+    # 2026-08-27 by reading them 40s apart during an active cycle while the
+    # actual temperature was clearly changing: they never moved. The real
+    # remaining-time calculation (see api/store_*.py's
+    # compute_cycle_remaining()) is built from the recipe fields below plus
+    # the live actual temperature instead, matching what the user
+    # described having to do by hand before this collector existed.
     "OVEN_LOAD_CYCLE.STEP_TIME_ELAPSED_TO_MMI": "step_time_elapsed",
     "OVEN_LOAD_CYCLE.STEP_TIME_TO_MMI": "step_time_total",
     "OVEN_LOAD_CYCLE.STEP_COMPLETE": "step_complete",
     "STEP_NUMBER": "step_number",
     "CURRENT_STEP": "current_step",
     "RECIPE_COMPLETE": "recipe_complete",
+
+    # The live recipe actually driving the oven right now (as opposed to
+    # OVEN_RECIPE_COMPARE/_VIEW, which are for editing/comparing, not
+    # execution). SP_TEMP/RAMP_RATE/SOAK_TIME are a 5-element array
+    # (indices 0-4, matching STEP_1..STEP_5) - CURRENT_STEP above is
+    # confirmed 0-indexed against this same array (read live alongside
+    # STEP_NUMBER=1, the 1-indexed equivalent). SOAK_TIME is in HOURS.
+    # SP_TEMP is polled by CALIBRATED_TEMPERATURE for zone1_temp already;
+    # this is the recipe's TARGET, a separate live-confirmed real value
+    # (365, matching the live PLC setpoint exactly).
+    "OVEN_RECIPE_RUN.SIZE": "recipe_step_count",
+    "OVEN_RECIPE_RUN.SP_TEMP[0]": "recipe_step0_temp",
+    "OVEN_RECIPE_RUN.RAMP_RATE[0]": "recipe_step0_ramp_rate",
+    "OVEN_RECIPE_RUN.SOAK_TIME[0]": "recipe_step0_soak_hr",
+    "OVEN_RECIPE_RUN.SP_TEMP[1]": "recipe_step1_temp",
+    "OVEN_RECIPE_RUN.RAMP_RATE[1]": "recipe_step1_ramp_rate",
+    "OVEN_RECIPE_RUN.SOAK_TIME[1]": "recipe_step1_soak_hr",
+    "OVEN_RECIPE_RUN.SP_TEMP[2]": "recipe_step2_temp",
+    "OVEN_RECIPE_RUN.RAMP_RATE[2]": "recipe_step2_ramp_rate",
+    "OVEN_RECIPE_RUN.SOAK_TIME[2]": "recipe_step2_soak_hr",
+    "OVEN_RECIPE_RUN.SP_TEMP[3]": "recipe_step3_temp",
+    "OVEN_RECIPE_RUN.RAMP_RATE[3]": "recipe_step3_ramp_rate",
+    "OVEN_RECIPE_RUN.SOAK_TIME[3]": "recipe_step3_soak_hr",
+    "OVEN_RECIPE_RUN.SP_TEMP[4]": "recipe_step4_temp",
+    "OVEN_RECIPE_RUN.RAMP_RATE[4]": "recipe_step4_ramp_rate",
+    "OVEN_RECIPE_RUN.SOAK_TIME[4]": "recipe_step4_soak_hr",
+
+    # Ramp-complete / soak-begun signal, per burner. Zone 1 (burner 1) is
+    # the trusted thermocouple (USE_B1_TCOUPLE=True, USE_B2_TCOUPLE=False
+    # confirmed live) so burner1_at_steady_temp is the authoritative one
+    # the remaining-time calculation uses.
+    "BURNER_1_AT_STEADY_TEMP": "burner1_at_steady_temp",
+    "BURNER_2_AT_STEADY_TEMP": "burner2_at_steady_temp",
 
     # Doors - polarity unconfirmed, see ACTIVE_LOW_SUSPECTS below.
     "OVEN_ENTRANCE_DOOR.FULL_DOWN_LIMIT_SWITCH": "entrance_door_down",

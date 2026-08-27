@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from collector import config  # noqa: E402
+from . import cycle_time  # noqa: E402
 
 # How many poll intervals may pass before the newest sample is considered
 # stale. Two-and-a-half gives some slack for a missed poll before the
@@ -119,6 +120,7 @@ def current(oven_id):
 
     ts = _parse_ts(row["ts"])
     age = (datetime.now(timezone.utc) - ts).total_seconds() if ts else None
+    now = datetime.now(timezone.utc)
 
     return {
         "oven": {"id": oven["id"], "name": oven["name"], "ip": oven["ip"],
@@ -135,6 +137,9 @@ def current(oven_id):
             "zone1_burner": row["zone1_burner"],
             "zone2_burner": row["zone2_burner"],
             "cycle_time_left_min": row["cycle_time_left_min"],
+            "cycle_time_remaining_computed_min": cycle_time.compute_remaining_min(
+                snapshot, row["state"],
+                _current_step_anchor(oven_id, snapshot.get("current_step")), now),
             "exhaust_fan_active": row["exhaust_fan_active"],
             "load_temp_min": row["load_temp_min"],
             "load_temp_mean": row["load_temp_mean"],
@@ -275,6 +280,35 @@ def _door_closed(snapshot, side):
     if raw is None or not isinstance(raw, (bool, int)):
         return None
     return not bool(raw)
+
+
+def _current_step_anchor(oven_id, current_step):
+    """steady_reached_ts for the step_events row matching the CURRENT step.
+
+    Only trusts the latest row if its step_number matches - if the
+    collector has not yet recorded the current step (a brief lag right
+    after a step transition) this returns None rather than a stale
+    timestamp from a previous, different step, which cycle_time's caller
+    treats as "no anchor yet" (full soak remaining, not a wrong elapsed
+    time from the wrong step).
+    """
+    if current_step is None:
+        return None
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                """SELECT step_number, steady_reached_ts FROM step_events
+                   WHERE oven_id = ? ORDER BY id DESC LIMIT 1""",
+                (oven_id,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        # step_events does not exist yet on this database - an older
+        # collector build that has not restarted with the current schema.
+        # No anchor is exactly the right answer here, same as "no rows yet".
+        return None
+    if row is None or row["step_number"] != current_step or row["steady_reached_ts"] is None:
+        return None
+    return _parse_ts(row["steady_reached_ts"])
 
 
 def _probe_valid(value):

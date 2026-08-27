@@ -232,6 +232,16 @@ function renderTiles(data) {
     ["Cycle", f.get("cycle_active") ? "RUNNING" : "not running",
       typeof s.cycle_time_left_min === "number"
         ? `load time ${(s.cycle_time_left_min / 60).toFixed(1)}h` : ""],
+    // Computed, not read from the PLC - HR_LOAD_TIME_LEFT_TO_MMI and
+    // friends were confirmed live to never actually count down. This is
+    // derived from the active recipe's target temp/ramp rate/soak time
+    // plus the live actual temperature, gated to RUNNING only (an idle,
+    // cooling oven's stale recipe fields would otherwise produce a
+    // meaningless number - see api/cycle_time.py).
+    ["Time Remaining",
+      typeof s.cycle_time_remaining_computed_min === "number"
+        ? fmtDuration(s.cycle_time_remaining_computed_min * 60) : "&ndash;",
+      "computed from the recipe, not a PLC countdown"],
     ["Exhaust", fmtNum(s.exhaust_fan_active, 0, " Hz"), "VFD output frequency"],
     doorsTile(s),
   ];

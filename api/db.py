@@ -38,3 +38,5 @@ def ensure_indexes():
     db.state_events.create_index([("oven_id", 1), ("ts_start", 1)])
     db.plex_loads.create_index("source_id", unique=True)
     db.plex_loads.create_index([("oven_id", 1), ("ts", -1)])
+    db.step_events.create_index("source_id", unique=True)
+    db.step_events.create_index([("oven_id", 1), ("ramp_start_ts", -1)])
