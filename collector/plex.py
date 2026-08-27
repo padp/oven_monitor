@@ -90,15 +90,41 @@ def _post(url, params, json, timeout=45):
     return resp
 
 
-def get_furnace_loads(workcenter_key, begin_date, end_date, active_only=True):
+# WorkcenterKey per oven, confirmed live 2026-08-26/27 (each search's rows came
+# back labeled with the expected WorkcenterCode). WorkcenterCode itself is not
+# a search input - Plex only takes the key - so it's recorded here purely for
+# reference/logging, not passed to any request.
+WORKCENTER_SMALL_OVEN = "58085"   # PAD-Small Aging Oven
+WORKCENTER_LARGE_OVEN = "58084"   # PAD-Large Aging Oven
+
+# FurnaceLoadStatusKey values, discovered live 2026-08-27 by inspecting the
+# status breakdown of ~140-220 unfiltered rows per oven (not documented
+# anywhere the user pointed to - reverse-engineered from real data). 809 was
+# user-provided and confirmed to isolate exactly the one real Started load
+# that was live at the time; 808/810 were simply the only other values
+# observed in the same real data and are recorded for reference, not because
+# any caller needs them yet.
+STATUS_PLANNED = "808"
+STATUS_STARTED = "809"
+STATUS_COMPLETED = "810"
+
+
+def get_furnace_loads(workcenter_key, begin_date, end_date, active_only=True, status_key=None):
     """Recent furnace load cycles for one workcenter.
 
-    workcenter_key: Plex's WorkcenterKey, e.g. "58085" for PAD-Small Aging Oven
-      (confirmed 2026-08-26 via a captured search - see reference/plex_curl.txt).
+    workcenter_key: Plex's WorkcenterKey - see WORKCENTER_SMALL_OVEN /
+      WORKCENTER_LARGE_OVEN above.
     begin_date, end_date: ISO 8601 strings, e.g. "2026-08-25T05:00:00.000Z".
       Per the user's own note captured alongside the original request: the
       begin date should be one day before "today" to reliably catch the
       currently-running cycle, which may have started the previous day.
+    status_key: optional FurnaceLoadStatusKey (see STATUS_* above) to filter
+      server-side. Narrowing to STATUS_STARTED specifically is dramatically
+      faster - measured live 2026-08-27 at 1.9s for 1 row vs. 19.9s for 140
+      unfiltered rows over the same window - because Plex does the filtering
+      itself rather than this returning everything for client-side filtering.
+      See get_current_load() for the confirmed-vs-guess pattern this exists
+      to support; most callers should use that rather than this directly.
 
     Returns the raw list of load records (each with CyclesData - temperature,
     ActualStartTime/ActualEndTime - and ContainersData - SerialNo, JobNo,
@@ -106,18 +132,76 @@ def get_furnace_loads(workcenter_key, begin_date, end_date, active_only=True):
     internal identifier for this search screen, carried over from the capture
     as-is rather than guessed at.
     """
+    payload = {
+        "ActiveOnly": active_only,
+        "BeginDate": begin_date,
+        "EndDate": end_date,
+        "WorkcenterKey": str(workcenter_key),
+    }
+    if status_key is not None:
+        payload["FurnaceLoadStatusKey"] = status_key
     resp = _post(
         "https://cloud.plex.com/ProductionTracking/FurnaceLoad/Search",
         params={"limit": "true", "sourceActionKey": "19727"},
-        json={
-            "ActiveOnly": active_only,
-            "BeginDate": begin_date,
-            "EndDate": end_date,
-            "WorkcenterKey": str(workcenter_key),
-        },
+        json=payload,
     )
     data = resp.json()
     return data if isinstance(data, list) else data.get("Data", {}).get("Rows", [])
+
+
+def get_current_load(workcenter_key, begin_date, end_date):
+    """Best answer to "what load is running in this oven right now?"
+
+    Two-tier lookup, in order:
+
+    1. CONFIRMED: ask Plex directly for loads with FurnaceLoadStatusKey ==
+       STATUS_STARTED. If Plex has one, that is the operator having actually
+       toggled "Started" on this load - trust it outright, and this is also
+       the fast path (see the latency note on get_furnace_loads' status_key).
+
+    2. GUESS, if step 1 found nothing: the operator may simply not have
+       marked anything Started yet even though a load is physically running.
+       Falls back to an unfiltered search over the same window. Many older
+       records (confirmed live 2026-08-27 - a load numbered far below the
+       current ~28600s still turned up in a 2-day window search) carry a
+       CyclesData entry that is entirely null - no ActualStartTime, no
+       ActualEndTime, Temperature 0 - not a currently-running load, just an
+       incompletely-logged historical one, and BeginDate/EndDate evidently
+       does not filter these out by real occurrence time the way its name
+       suggests. Those are excluded outright by requiring a real
+       ActualStartTime. Among what remains, a load with no ActualEndTime yet
+       is preferred (genuinely looks unfinished) over one with a real end
+       time (definitely already over); within either group, the most
+       recently started one wins. This is still a guess, not a confirmation
+       - it is presented as one via the confirmed=False return value.
+
+    Returns (load_dict_or_None, confirmed: bool). (None, False) means neither
+    tier found anything - genuinely no load data in this window.
+    """
+    started = get_furnace_loads(workcenter_key, begin_date, end_date, status_key=STATUS_STARTED)
+    if started:
+        return started[0], True
+
+    all_loads = get_furnace_loads(workcenter_key, begin_date, end_date)
+
+    def _start_time(load):
+        cycles = load.get("CyclesData") or []
+        return cycles[0].get("ActualStartTime") if cycles else None
+
+    def _still_open(load):
+        cycles = load.get("CyclesData") or []
+        return bool(cycles) and cycles[0].get("ActualEndTime") is None
+
+    candidates = [load for load in all_loads if _start_time(load)]
+    if not candidates:
+        return None, False
+
+    # ISO 8601 UTC strings in a consistent format sort chronologically as
+    # plain strings - no datetime parsing needed for "which is most recent."
+    open_candidates = [load for load in candidates if _still_open(load)]
+    pool = open_candidates or candidates
+    best = max(pool, key=_start_time)
+    return best, False
 
 
 def get_container(serial_no, start_date, end_date, pcn=270494):
