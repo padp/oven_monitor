@@ -247,6 +247,7 @@ def current_plex_load(oven_id):
         "part_no": row["part_no"],
         "part_name": row["part_name"],
         "quantity": row["quantity"],
+        "containers": json.loads(row["containers_json"]) if row["containers_json"] else [],
         "stale": age is None or age > PLEX_STALE_AFTER_S,
         "age_s": age,
     }

@@ -259,16 +259,37 @@ function renderProbes(data) {
     : "All probes reporting.";
 }
 
-function renderJob(job) {
+function renderJob(job, ovenState) {
   const el = document.getElementById("job-content");
   if (!job) {
     el.innerHTML = '<div class="attention-detail">No Plex data yet - plex_sync.py has not reported for this oven.</div>';
     return;
   }
 
-  const badge = job.confirmed
-    ? '<span class="flag ok">Plex-confirmed</span>'
-    : '<span class="flag">unconfirmed guess</span>';
+  // A load Plex itself has already closed out is not "current" in any
+  // useful sense, confirmed or not - showing job details for it would
+  // read as if something were still in the oven when nothing is.
+  if (job.furnace_load_status === "Completed") {
+    el.innerHTML = `<div class="attention-detail">No active job - the last known load ` +
+      `(Furnace Load ${job.furnace_load_no || "?"}) is already Completed.</div>`;
+    return;
+  }
+
+  let badge, badgeNote;
+  if (job.confirmed) {
+    badge = '<span class="flag ok">Plex-confirmed</span>';
+    badgeNote = "the operator actually toggled \"Started\" on this load in Plex.";
+  } else if (ovenState !== "RUNNING") {
+    badge = '<span class="flag">Unconfirmed - staged for next load</span>';
+    badgeNote = "the oven is not currently RUNNING, so this load - not marked Started in " +
+      "Plex - most likely is not physically in the oven yet; it reads as queued/prepped " +
+      "for whenever it next runs.";
+  } else {
+    badge = '<span class="flag">unconfirmed guess</span>';
+    badgeNote = "the oven IS running but nothing is marked Started in Plex, so this is the " +
+      "most-recently-started load instead - it may genuinely be what's running, but the " +
+      "operator has not confirmed it in Plex.";
+  }
   const staleNote = job.stale
     ? `<div class="banner" style="margin-top:0.6rem;">Plex data last refreshed ${fmtAge(job.age_s)} - showing the last known job.</div>`
     : "";
@@ -276,6 +297,16 @@ function renderJob(job) {
   const part = job.part_no
     ? `${job.part_no}${job.part_name ? " &mdash; " + job.part_name : ""}`
     : "&ndash;";
+
+  const containers = job.containers || [];
+  const containerRows = containers.map((c) => `
+    <tr>
+      <td class="tag-name">${c.serial_no || "&ndash;"}</td>
+      <td>${c.job_no || "&ndash;"}</td>
+      <td>${c.part_no || "&ndash;"}</td>
+      <td>${c.part_name || "&ndash;"}</td>
+      <td class="value">${fmtNum(c.quantity, 0)}</td>
+    </tr>`).join("");
 
   el.innerHTML = `
     <div class="status-row" style="margin-bottom: 0.75rem;">
@@ -289,12 +320,14 @@ function renderJob(job) {
       <div class="tile"><div class="tile-label">Target Temp</div><div class="tile-value">${fmtNum(job.temperature, 0, "°F")}</div></div>
     </div>
     ${staleNote}
-    <p class="footnote">
-      "unconfirmed guess" means Plex has no load marked <strong>Started</strong> for this oven right
-      now, so this is the most-recently-started load instead - it may already be finished. A
-      <span class="flag ok">Plex-confirmed</span> badge means the operator actually toggled
-      "Started" on this load in Plex.
-    </p>`;
+    ${containers.length > 1 ? `
+    <div class="overflow-wrap" style="margin-top: 0.9rem;">
+      <table>
+        <thead><tr><th>Serial No</th><th>Job No</th><th>Part No</th><th>Part Name</th><th>Qty</th></tr></thead>
+        <tbody>${containerRows}</tbody>
+      </table>
+    </div>` : ""}
+    <p class="footnote">${badge} &mdash; ${badgeNote}</p>`;
 }
 
 function renderTags(data) {
@@ -372,7 +405,7 @@ async function refresh() {
     renderProbes(cur);
     renderTags(cur);
     renderStates(st);
-    renderJob(jobResp.load);
+    renderJob(jobResp.load, (cur.sample || {}).state);
   } catch (err) {
     document.getElementById("last-updated").textContent = "API unreachable";
     const banner = document.getElementById("stale-banner");

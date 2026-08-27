@@ -186,6 +186,8 @@ def current_plex_load(oven_id):
             "serial_no", "job_no", "part_no", "part_name", "quantity")
     out = {k: row.get(k) for k in keep}
     out["confirmed"] = bool(out["confirmed"])
+    cj = row.get("containers_json")
+    out["containers"] = json.loads(cj) if cj else []
     out["stale"] = age is None or age > PLEX_STALE_AFTER_S
     out["age_s"] = age
     return out

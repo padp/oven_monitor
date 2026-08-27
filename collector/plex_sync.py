@@ -67,21 +67,50 @@ def _container_date_window(now):
     return begin.strftime(fmt), end.strftime(fmt)
 
 
-def _flatten(load, confirmed):
-    """One furnace load + (if available) its first container's part info.
+def _resolve_container(container, begin, end):
+    """One ContainersData entry -> {serial_no, job_no, part_no, part_name, quantity}.
 
-    Only ever resolves ONE container per load - the load can carry several,
-    but the dashboard just needs "what's probably in this oven", not a full
-    manifest. get_container failures (a real possibility - see plex.py's
-    _post retry-then-raise) are caught here specifically, not by the caller,
-    because a part-lookup failure should not discard an otherwise-good
-    load/cycle result.
+    A per-container failure (a real possibility - see plex.py's _post
+    retry-then-raise) returns what's already known (serial/job from the
+    load itself) with part fields left None, rather than raising - one bad
+    lookup must not discard the rest of the load's containers.
+    """
+    serial = container.get("SerialNo")
+    out = {"serial_no": serial, "job_no": container.get("JobNo"),
+           "part_no": None, "part_name": None, "quantity": None}
+    if not serial:
+        return out
+    try:
+        rows = plex.get_container(serial, start_date=begin, end_date=end)
+    except Exception as exc:
+        print("plex_sync: get_container(%r) failed (keeping serial/job without part details): %s"
+              % (serial, exc))
+        return out
+    if rows:
+        out["part_no"] = rows[0].get("PartNo")
+        out["part_name"] = rows[0].get("PartName")
+        out["quantity"] = rows[0].get("Quantity")
+    return out
+
+
+def _flatten(load, confirmed):
+    """One furnace load, with every one of its containers resolved to a part.
+
+    Measured live 2026-08-27: ~0.6-0.8s per container once the Plex session
+    is warm, so even a load with 10-11 containers (both observed live) costs
+    well under 10s total - comfortably inside the 120s sync interval for two
+    ovens. Each container is resolved independently (see _resolve_container)
+    so one bad lookup does not lose the rest.
     """
     cycles = load.get("CyclesData") or []
     c0 = cycles[0] if cycles else {}
-    containers = load.get("ContainersData") or []
+    raw_containers = load.get("ContainersData") or []
 
-    out = {
+    begin, end = _container_date_window(datetime.now(timezone.utc))
+    containers = [_resolve_container(c, begin, end) for c in raw_containers]
+
+    first = containers[0] if containers else {}
+    return {
         "confirmed": confirmed,
         "furnace_load_no": load.get("FurnaceLoadNo"),
         "furnace_load_status": load.get("FurnaceLoadStatus"),
@@ -89,31 +118,16 @@ def _flatten(load, confirmed):
         "temperature": c0.get("Temperature"),
         "actual_start_time": c0.get("ActualStartTime"),
         "actual_end_time": c0.get("ActualEndTime"),
-        "serial_no": None, "job_no": None, "part_no": None,
-        "part_name": None, "quantity": None,
+        # Kept as a compact "at a glance" summary (the dashboard's job-card
+        # header) alongside the full per-serial breakdown in `containers` -
+        # a load can mix more than one part (observed live: LH/RH shade
+        # variants in the same load), so this is only ever a representative
+        # example, not necessarily the whole story.
+        "serial_no": first.get("serial_no"), "job_no": first.get("job_no"),
+        "part_no": first.get("part_no"), "part_name": first.get("part_name"),
+        "quantity": first.get("quantity"),
+        "containers": containers,
     }
-    if not containers:
-        return out
-
-    serial = containers[0].get("SerialNo")
-    out["serial_no"] = serial
-    out["job_no"] = containers[0].get("JobNo")
-    if not serial:
-        return out
-
-    try:
-        begin, end = _container_date_window(datetime.now(timezone.utc))
-        rows = plex.get_container(serial, start_date=begin, end_date=end)
-    except Exception as exc:
-        print("plex_sync: get_container(%r) failed (keeping load info without part details): %s"
-              % (serial, exc))
-        return out
-
-    if rows:
-        out["part_no"] = rows[0].get("PartNo")
-        out["part_name"] = rows[0].get("PartName")
-        out["quantity"] = rows[0].get("Quantity")
-    return out
 
 
 def sync_once(storage, ovens):

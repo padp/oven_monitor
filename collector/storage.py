@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS plex_loads (
     job_no TEXT,
     part_no TEXT,
     part_name TEXT,
-    quantity REAL
+    quantity REAL,
+    containers_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_plex_loads_oven_ts ON plex_loads(oven_id, ts);
 """
@@ -101,9 +102,23 @@ class Storage:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._conn = sqlite3.connect(db_path)
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
         # Open state segment per oven, so two ovens don't share one.
         self._open_state = {}
+
+    def _migrate(self):
+        """Add columns introduced after a db file already existed.
+
+        CREATE TABLE IF NOT EXISTS only creates a table that is missing
+        entirely - it does nothing to a table that already exists but is
+        missing a column a newer schema added, which is exactly what
+        happened when containers_json was added to plex_loads after this
+        project's real production database already had rows in it.
+        """
+        existing = {row[1] for row in self._conn.execute("PRAGMA table_info(plex_loads)")}
+        if existing and "containers_json" not in existing:
+            self._conn.execute("ALTER TABLE plex_loads ADD COLUMN containers_json TEXT")
 
     # --- samples ------------------------------------------------------
 
@@ -143,10 +158,11 @@ class Storage:
         cols = [
             "oven_id", "ts", "confirmed", "furnace_load_no", "furnace_load_status",
             "operation_code", "temperature", "actual_start_time", "actual_end_time",
-            "serial_no", "job_no", "part_no", "part_name", "quantity",
+            "serial_no", "job_no", "part_no", "part_name", "quantity", "containers_json",
         ]
         values = [oven_id, ts.isoformat(), int(load.get("confirmed", False))]
-        values += [load.get(c) for c in cols[3:]]
+        values += [load.get(c) for c in cols[3:-1]]
+        values += [json.dumps(load.get("containers", []), default=str)]
         placeholders = ",".join("?" * len(cols))
         self._conn.execute(
             "INSERT INTO plex_loads (%s) VALUES (%s)" % (",".join(cols), placeholders),
