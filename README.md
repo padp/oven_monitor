@@ -272,15 +272,32 @@ number) rather than a live cycle end-to-end - the oven was between cycles
 throughout this work. The formula itself is separately unit-tested against known
 values (ramping, soaking, soak-overrun, multi-step, no-active-step).
 
-**Only wired up for the small oven.** The large oven has the same three
-parameters under a completely different naming scheme (`S1_CYC_RAMP_SPT` /
-`S1_CYC_RAMP_SPT_MIN` (minutes, not hours) / `S1_AR_RAMP` / `S1_SR_RAMP` for up to
-4 steps, `USE_SECS_PER_DEG_RAMP_MATH` literally confirming the same
-seconds-per-degree convention) - confirmed to exist, but the oven was idle
-throughout this investigation, so real values couldn't be validated, and it is
-unclear yet whether `AR_RAMP` or `SR_RAMP` is the one that actually governs. Not
-wired into `LARGE_OVEN_TAGS` or `compute_remaining_min` until that's settled
-against a real cycle.
+**The large oven turned out not to need any of this.** Once it was caught running a
+real cycle (2026-08-27), `CYCLE_TOTAL_MINUTES_LEFT` was confirmed to genuinely count
+down (350 -> 349 -> 349 -> 349 over 60s) - unlike the small oven, it already has a
+working native countdown, the same one `large_oven_status.py` has trusted for ~10
+months. `config.OVENS[...]["cycle_time_left_min_trusted"]` (`api/store_*.py`'s
+`_best_remaining_min()`) picks the mechanism per oven: the large oven's trusted
+native field is used directly, the small oven falls back to the recipe-based
+`compute_remaining_min()`. The large oven's own recipe parameters exist under a
+completely different naming scheme (`S1_CYC_RAMP_SPT` / `S1_CYC_RAMP_SPT_MIN` in
+minutes, not hours / `S1_AR_RAMP` / `S1_SR_RAMP` for up to 4 steps) but read as
+suspicious defaults even during that same real cycle, and remain unwired - moot for
+the basic "time remaining" question now that the native field is confirmed to work,
+though still relevant if per-step visibility is ever wanted for that oven too.
+
+**A second, more consequential bug surfaced by the same live check:** the small
+oven's `cycle_active` (`BEGIN_LOAD_TIME_TIMER`) read `False` while both burners were
+actively firing (`MAIN_FLAME_ON` true, firing rate >2000) partway through a real
+cycle - not just at cycle end, mid-cycle. Requiring it as a gate produced a false
+`UNKNOWN` instead of `RUNNING`, which also silently blocked the cycle-time-remaining
+feature (gated on `state == "RUNNING"`). `Detector._is_running()` now trusts
+`equipment_active` (flame/firing/PID bits - direct, real-time evidence) on its own
+for ovens with a `cycle_active_field` configured; elevated temperature alone still
+requires the timer's corroboration, since that alone could just be a recently-finished
+cycle cooling down. Verified live (immediately reads `RUNNING` again) and replayed
+against all 697,592 historical large-oven snapshots with zero regression (that oven
+has no `cycle_active_field`, so it takes the original, unchanged code path).
 
 ## Plex integration - job context on the dashboard
 

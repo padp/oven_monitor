@@ -137,9 +137,7 @@ def current(oven_id):
             "zone1_burner": row["zone1_burner"],
             "zone2_burner": row["zone2_burner"],
             "cycle_time_left_min": row["cycle_time_left_min"],
-            "cycle_time_remaining_computed_min": cycle_time.compute_remaining_min(
-                snapshot, row["state"],
-                _current_step_anchor(oven_id, snapshot.get("current_step")), now),
+            "cycle_time_remaining_computed_min": _best_remaining_min(oven, row, snapshot, oven_id, now),
             "exhaust_fan_active": row["exhaust_fan_active"],
             "load_temp_min": row["load_temp_min"],
             "load_temp_mean": row["load_temp_mean"],
@@ -280,6 +278,24 @@ def _door_closed(snapshot, side):
     if raw is None or not isinstance(raw, (bool, int)):
         return None
     return not bool(raw)
+
+
+def _best_remaining_min(oven, row, snapshot, oven_id, now):
+    """The best available "time remaining" for this oven.
+
+    Two mechanisms, picked per-oven by config.OVENS[...]["cycle_time_left_min_trusted"]:
+    the large oven's CYCLE_TOTAL_MINUTES_LEFT genuinely counts down (confirmed
+    live 2026-08-27: 350->349->349->349 over 60s during a real cycle) - use it
+    directly rather than a recipe-based calculation it does not need. The small
+    oven's equivalent tag is a frozen setpoint, so it uses the recipe-based
+    compute_remaining_min() instead. Only trusted while RUNNING either way, for
+    the same reason compute_remaining_min gates on it: an idle oven's last-known
+    values do not mean a cycle is actually in progress.
+    """
+    if oven.get("cycle_time_left_min_trusted"):
+        return row["cycle_time_left_min"] if row["state"] == "RUNNING" else None
+    return cycle_time.compute_remaining_min(
+        snapshot, row["state"], _current_step_anchor(oven_id, snapshot.get("current_step")), now)
 
 
 def _current_step_anchor(oven_id, current_step):

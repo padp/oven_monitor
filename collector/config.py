@@ -261,6 +261,11 @@ OVENS = {
         # WORKCENTER_SMALL_OVEN. Used by collector/plex_sync.py to look up
         # what job is actually running, alongside the PLC telemetry.
         "plex_workcenter_key": "58085",
+        # False: cycle_time_left_min is HR_LOAD_TIME_LEFT_TO_MMI here, which
+        # is a frozen setpoint, not a countdown - confirmed live 2026-08-27,
+        # read 40s apart during an active cycle with no change. Use the
+        # recipe-based calculation instead (api/cycle_time.py).
+        "cycle_time_left_min_trusted": False,
     },
     "large": {
         "id": "large",
@@ -280,6 +285,17 @@ OVENS = {
         "cycle_active_field": None,
         "implicit_stall_fault": True,
         "plex_workcenter_key": "58084",
+        # True: CYCLE_TOTAL_MINUTES_LEFT genuinely counts down here -
+        # confirmed live 2026-08-27 during a real cycle (350 -> 349 -> 349
+        # -> 349 over 60s), and it's what large_oven_status.py has trusted
+        # for ~10 months. Unlike the small oven, no recipe-based
+        # calculation is needed - this oven already has a working native
+        # countdown. (Its own recipe parameters exist under a different
+        # naming scheme, S1_CYC_RAMP_SPT and friends, but have not been
+        # validated - the suspicious-default values seen even during this
+        # same real cycle suggest they may not be what actually drives it.
+        # Moot for now: this field already works.)
+        "cycle_time_left_min_trusted": True,
     },
 }
 

@@ -63,6 +63,21 @@ class Detector:
         equipment_active = self._equipment_active(s)
 
         self.previous_cycle_time = num(s.get("cycle_time_left_min"))
+
+        if self.oven.get("cycle_active_field"):
+            # cycle_active_field (BEGIN_LOAD_TIME_TIMER on the small oven) is
+            # confirmed NOT reliable as a sustained "cycle in progress" gate -
+            # read live 2026-08-27 as False while both burners were actively
+            # firing (MAIN_FLAME_ON true, firing rate >2000) partway through a
+            # real cycle, which produced a false UNKNOWN instead of RUNNING.
+            # equipment_active is direct, real-time evidence of active
+            # operation (flame/firing/PID bits, not a timer) - trust it on its
+            # own. Temperature alone still requires the timer's corroboration,
+            # since elevated temp with no active equipment could just be a
+            # recently-finished cycle cooling down rather than a genuinely new
+            # one starting.
+            return equipment_active or (temps_at_process and self._cycle_active(s))
+
         return self._cycle_active(s) and (temps_at_process or equipment_active)
 
     def _cycle_active(self, s):
