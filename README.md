@@ -425,6 +425,44 @@ one-time snapshot copy of the db file instead of querying the live one directly.
 a production concern: the deployed API is Mongo-backed, and the collector's SQLite
 file is local disk, never shared with another process.
 
+## Faults card, and a Purge tile in place of Exhaust
+
+A dedicated "Faults" card lists every field whose name unambiguously means
+true/nonzero = bad (`fault`/`failure`/`alarm`) - a curated regex, deliberately
+narrower than the raw tag monitor's "Faults & alarms" grouping. That broader
+grouping also catches `z1_safeguard_relay`/`z2_safeguard_relay` (harmless for a raw
+tag table), but those are excluded here: confirmed live 2026-08-28, both read `True`
+on the large oven while it was running with nothing else wrong - consistent with the
+`(reference only)` caveat already on these two in the tag map above, and the same
+shape of trap the door limit switches turned out to be (wired so the normal/safe
+state reads `true`, not `false`). Until a real trip is observed to confirm which way
+they actually read, they stay out of this card's true-means-bad verdict rather than
+risk crying wolf on every normal poll.
+
+The Key Indicators grid's "Exhaust" tile (a bare Hz reading) is now a "Purge" tile
+instead - `burner1_purging` (Zone 1) is the small oven's source of truth per the
+user's own call, not `burner2_purging` or a combination. The large oven has no
+confirmed equivalent bit yet (`PURGE_CONTROL`/`PURGE_TIMER`/`PURGE_COMPLETE_COUNTER`
+exist - discovered live via `GetTagList()` against `10.4.20.93` - but none read back
+as an obvious "purging right now" boolean without further investigation), so its
+Purge tile reads `&ndash;`.
+
+**Large oven doors - still unresolved.** The small oven's confirmed
+`OVEN_ENTRANCE_DOOR.FULL_DOWN_LIMIT_SWITCH` / `OVEN_EXIT_DOOR.FULL_DOWN_LIMIT_SWITCH`
+naming does not exist on the large oven - checked live via `GetTagList()` against all
+389 controller- and program-scope tags on `10.4.20.93`, including a proposed
+`OVEN_EXIT_DOOR.FULL_DOWN_TO_MMI` / `OVEN_ENTRANCE_DOOR.FULL_UP_TO_MMI`-style path,
+none of which resolve (`Path segment error`, and zero tags anywhere contain
+`OVEN_EXIT`, `OVEN_ENTRANCE`, or `TO_MMI`). What actually exists and contains "DOOR"
+on that controller: `DOOR_CTRL_BITS` (a 10-element INT array - only element 0's high
+bit and element 1's low bit are ever nonzero, live meaning not yet decoded),
+`DOOR_CTRL_TIMERS`, `Door_not_CLosed_Horn` (a single BOOL, currently `False` - an
+alarm-horn output rather than a raw limit switch, so its timing/semantics relative to
+the door's actual position are unconfirmed), and `Z2_DOOR_FLASHER` (a light output,
+not a status input). Nothing wired into the dashboard yet - needs either the real
+ladder logic/HMI reference for `DOOR_CTRL_BITS`, or a live open/close test against
+`Door_not_CLosed_Horn` the same way the small oven's door polarity was confirmed.
+
 ## Conventions
 
 - Local secrets live in `secret/*.txt` (gitignored), matching sibling projects.

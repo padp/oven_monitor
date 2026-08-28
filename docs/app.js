@@ -129,6 +129,16 @@ function burnerOn(f, flameField, mtrField) {
   return typeof mtr === "number" ? mtr > 0 : null;
 }
 
+// Small oven only - BURNER_1.PURGING (Zone 1) is the source of truth here
+// per the user's own call, not burner2_purging or a combination of both.
+// The large oven has no equivalent confirmed bit yet (PURGE_CONTROL/
+// PURGE_TIMER exist but their live values aren't confirmed to mean
+// "purging now" - see PLC tag discovery notes), so it reads "&ndash;".
+function purgeTile(purging) {
+  const value = purging === true ? "PURGING" : purging === false ? "OFF" : "&ndash;";
+  return ["Purge", value];
+}
+
 function doorsTile(s) {
   const e = s.entrance_door_closed, x = s.exit_door_closed;
   if (e === null || e === undefined || x === null || x === undefined) {
@@ -162,7 +172,7 @@ function renderTiles(data) {
     ["Time Remaining",
       typeof s.cycle_time_remaining_computed_min === "number"
         ? fmtDuration(s.cycle_time_remaining_computed_min * 60) : "&ndash;"],
-    ["Exhaust", fmtNum(s.exhaust_fan_active, 0, " Hz")],
+    purgeTile(f.get("burner1_purging")),
     doorsTile(s),
     ["Program #", f.has("recipe_number") ? String(f.get("recipe_number")) : "&ndash;"],
   ];
@@ -188,6 +198,45 @@ function renderProbes(data) {
   document.getElementById("probe-note").innerHTML = bad
     ? `${bad} probe(s) pinned at 2192&deg;F &mdash; type J full scale, i.e. no signal. Excluded from the average.`
     : "All probes reporting.";
+}
+
+// Deliberately narrower than renderTags()' "Faults & alarms" grouping
+// regex (which also catches *_safeguard_relay, for raw tag-table display
+// only). A field only belongs here if true/nonzero is UNAMBIGUOUSLY bad
+// by its own name. z1_safeguard_relay/z2_safeguard_relay do not qualify -
+// confirmed live 2026-08-28 both read True on the large oven while it was
+// running completely normally with nothing else wrong, which is the same
+// shape of trap the door limit switches turned out to be (wired so the
+// "safe"/normal state reads true, not false) - see CONFIRMED_ACTIVE_LOW /
+// ACTIVE_LOW_SUSPECTS in collector/config.py for that precedent. Until a
+// real trip is observed to confirm which way these actually read, they
+// stay out of this card's true-means-bad verdict rather than risk crying
+// wolf on every normal poll.
+const FAULT_FIELD_RE = /fault|failure|alarm/i;
+
+function isFaultActive(f) {
+  return f.type === "bool" ? f.value === true : typeof f.value === "number" && f.value > 0;
+}
+
+function renderFaults(data) {
+  const faults = (data.fields || []).filter((f) => FAULT_FIELD_RE.test(f.field));
+  const card = document.getElementById("faults-card");
+  if (!faults.length) { card.classList.add("hidden"); return; }
+  card.classList.remove("hidden");
+  document.getElementById("faults-grid").innerHTML = faults.map((f) => {
+    const active = isFaultActive(f);
+    const display = f.type === "bool"
+      ? (f.value === true ? "ACTIVE" : f.value === false ? "clear" : "&ndash;")
+      : fmtValue(f.value, f.type);
+    return `<div class="probe ${active ? "invalid" : ""}">
+      <div class="probe-name">${f.field.replace(/_/g, " ")}</div>
+      <div class="probe-value">${display}</div>
+    </div>`;
+  }).join("");
+  const activeCount = faults.filter(isFaultActive).length;
+  document.getElementById("faults-note").textContent = activeCount
+    ? `${activeCount} fault${activeCount > 1 ? "s" : ""} active.`
+    : "All clear.";
 }
 
 /* --- temperature trend chart ------------------------------------ */
@@ -475,6 +524,7 @@ async function refresh() {
     if (cur.error) throw new Error(cur.error);
     latest = cur;
     renderStatus(cur);
+    renderFaults(cur);
     renderTiles(cur);
     renderProbes(cur);
     renderTags(cur);
