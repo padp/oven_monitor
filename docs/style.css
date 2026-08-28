@@ -231,6 +231,43 @@ main { max-width: 1040px; margin: 0 auto; padding: 0 1.5rem; }
   color: var(--color-text);
   font-size: 14px;
 }
+
+.table-tools select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 14px;
+  max-width: 100%;
+}
+
+/* Temperature trend chart -------------------------------------- */
+
+#temp-chart-container { overflow-x: auto; }
+
+.temp-chart { display: block; }
+.chart-grid { stroke: var(--color-border); stroke-width: 1; }
+.chart-axis-label {
+  fill: var(--color-text-muted);
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.chart-line { stroke-width: 2; }
+.chart-line-zone1 { stroke: var(--color-accent); }
+.chart-line-zone2 { stroke: var(--note); }
+
+.chart-legend {
+  display: flex;
+  gap: 1.25rem;
+  margin-top: 0.5rem;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.chart-legend-item { display: flex; align-items: center; gap: 0.4rem; }
+.chart-swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; }
+.chart-swatch-zone1 { background: var(--color-accent); }
+.chart-swatch-zone2 { background: var(--note); }
 .table-tools label { font-size: 13px; color: var(--color-text-muted); display: flex; gap: 0.35rem; align-items: center; }
 
 .overflow-wrap { overflow-x: auto; }

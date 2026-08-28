@@ -156,19 +156,60 @@ def current(oven_id):
     }
 
 
-def history(oven_id, hours=6, limit=2000):
-    """Time series for charting. Newest last."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    with _connect() as conn:
-        rows = conn.execute(
-            """SELECT ts, state, zone1_temp, zone2_temp, setpoint, zone1_burner,
+def history(oven_id, hours=6, limit=5000, start=None, end=None):
+    """Time series for charting. Newest last.
+
+    Two modes: the live chart wants "the last `hours`", relative to now
+    (start/end omitted). Reviewing a specific past load wants an explicit
+    absolute window instead - that load may be days old, so "hours back
+    from now" cannot express it. Passing start/end (ISO strings) overrides
+    the hours-based cutoff entirely rather than adding a second, easily
+    inconsistent code path.
+    """
+    if start is None:
+        start = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    query = """SELECT ts, state, zone1_temp, zone2_temp, setpoint, zone1_burner,
                       zone2_burner, cycle_time_left_min, exhaust_fan_active,
                       load_temp_mean, load_temp_min, load_temp_max
-               FROM samples WHERE oven_id = ? AND ts >= ?
-               ORDER BY id DESC LIMIT ?""",
-            (oven_id, cutoff, limit),
-        ).fetchall()
+               FROM samples WHERE oven_id = ? AND ts >= ?"""
+    params = [oven_id, start]
+    if end is not None:
+        query += " AND ts <= ?"
+        params.append(end)
+    query += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    with _connect() as conn:
+        rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in reversed(rows)]
+
+
+def recent_loads(oven_id, limit=30):
+    """Past Plex loads for this oven, most recent first - the historical
+    chart picker's list. One row per plex_sync.py sync tick that saw a
+    given furnace_load_no, so this naturally has duplicates per load
+    (re-synced every ~2 minutes while it's the current one); collapsed
+    here to one entry per distinct furnace_load_no, keeping its MOST
+    RECENT row - a load's status can genuinely change between syncs
+    (Started -> Completed), and the picker should show that, not a
+    stale first-seen status.
+    """
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT furnace_load_no, furnace_load_status, confirmed, program_number,
+                      part_no, part_name, actual_start_time, actual_end_time, ts
+               FROM plex_loads WHERE oven_id = ? AND furnace_load_no IS NOT NULL
+               ORDER BY id DESC LIMIT ?""",
+            (oven_id, limit * 6),  # oversample before dedup - see docstring
+        ).fetchall()
+    seen = {}
+    for r in rows:
+        # DESC order: the first time a furnace_load_no is encountered here
+        # IS its most recent row, so later (older) duplicates must not
+        # overwrite it.
+        if r["furnace_load_no"] not in seen:
+            seen[r["furnace_load_no"]] = dict(r)
+    ordered = sorted(seen.values(), key=lambda r: r["ts"], reverse=True)
+    return ordered[:limit]
 
 
 def states(oven_id, hours=24):

@@ -38,8 +38,8 @@ def current(oven_id):
     return _impl().current(oven_id)
 
 
-def history(oven_id, hours=6, limit=2000):
-    return _impl().history(oven_id, hours=hours, limit=limit)
+def history(oven_id, hours=6, limit=5000, start=None, end=None):
+    return _impl().history(oven_id, hours=hours, limit=limit, start=start, end=end)
 
 
 def states(oven_id, hours=24):
@@ -48,3 +48,7 @@ def states(oven_id, hours=24):
 
 def current_plex_load(oven_id):
     return _impl().current_plex_load(oven_id)
+
+
+def recent_loads(oven_id, limit=30):
+    return _impl().recent_loads(oven_id, limit=limit)

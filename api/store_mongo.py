@@ -116,16 +116,43 @@ def current(oven_id):
     }
 
 
-def history(oven_id, hours=6, limit=2000):
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+def history(oven_id, hours=6, limit=5000, start=None, end=None):
+    """See the identical function in store_sqlite.py: start/end (ISO
+    strings) override the hours-based cutoff entirely, for reviewing a
+    specific past load's absolute time window rather than "N hours ago".
+    """
+    if start is None:
+        start = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    ts_filter = {"$gte": start}
+    if end is not None:
+        ts_filter["$lte"] = end
     keep = ("ts", "state", "zone1_temp", "zone2_temp", "setpoint", "zone1_burner",
             "zone2_burner", "cycle_time_left_min", "exhaust_fan_active",
             "load_temp_mean", "load_temp_min", "load_temp_max")
     rows = list(get_db().samples.find(
-        {"oven_id": oven_id, "ts": {"$gte": cutoff}},
+        {"oven_id": oven_id, "ts": ts_filter},
         projection={"_id": False, **{k: True for k in keep}},
     ).sort("ts", -1).limit(limit))
     return [{k: r.get(k) for k in keep} for r in reversed(rows)]
+
+
+def recent_loads(oven_id, limit=30):
+    """See the identical function in store_sqlite.py for the full
+    reasoning - one entry per distinct furnace_load_no, keeping its most
+    recent document so a status change (Started -> Completed) shows up.
+    """
+    keep = ("furnace_load_no", "furnace_load_status", "confirmed", "program_number",
+            "part_no", "part_name", "actual_start_time", "actual_end_time", "ts")
+    rows = list(get_db().plex_loads.find(
+        {"oven_id": oven_id, "furnace_load_no": {"$ne": None}},
+        projection={"_id": False, **{k: True for k in keep}},
+    ).sort("ts", -1).limit(limit * 6))
+    seen = {}
+    for r in rows:
+        if r.get("furnace_load_no") not in seen:
+            seen[r["furnace_load_no"]] = {k: r.get(k) for k in keep}
+    ordered = sorted(seen.values(), key=lambda r: r["ts"], reverse=True)
+    return ordered[:limit]
 
 
 def states(oven_id, hours=24):

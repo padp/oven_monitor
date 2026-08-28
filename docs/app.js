@@ -289,6 +289,139 @@ function renderProbes(data) {
     : "All probes reporting.";
 }
 
+/* --- temperature trend chart ------------------------------------ */
+/* Hand-rolled SVG, deliberately - this dashboard has zero external
+ * dependencies (no CDN scripts, no charting library) everywhere else, and
+ * a simple two-line time series does not need one. */
+
+function fmtChartTime(ms) {
+  const d = new Date(ms);
+  return d.toLocaleString(undefined, { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function renderTempChart(samples) {
+  const el = document.getElementById("temp-chart-container");
+  const withTemp = (samples || []).filter((s) =>
+    typeof s.zone1_temp === "number" || typeof s.zone2_temp === "number");
+  if (withTemp.length < 2) {
+    el.innerHTML = '<div class="attention-detail">Not enough data in this window to plot.</div>';
+    return;
+  }
+
+  const W = Math.max(el.clientWidth || 0, 480);
+  const H = 260;
+  const padL = 46, padR = 12, padT = 10, padB = 26;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+
+  const times = withTemp.map((s) => new Date(s.ts).getTime());
+  const t0 = times[0], t1 = times[times.length - 1];
+  const tSpan = Math.max(t1 - t0, 1);
+
+  const vals = [];
+  for (const s of withTemp) {
+    if (typeof s.zone1_temp === "number") vals.push(s.zone1_temp);
+    if (typeof s.zone2_temp === "number") vals.push(s.zone2_temp);
+  }
+  const vMin = Math.min(...vals), vMax = Math.max(...vals);
+  const vPad = (vMax - vMin) * 0.1 || 10;
+  const yMin = vMin - vPad, yMax = vMax + vPad;
+
+  const x = (t) => padL + ((t - t0) / tSpan) * plotW;
+  const y = (v) => padT + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
+
+  function pathFor(key) {
+    let d = "", started = false;
+    withTemp.forEach((s, i) => {
+      const v = s[key];
+      if (typeof v !== "number") { started = false; return; }
+      d += (started ? "L" : "M") + x(times[i]).toFixed(1) + "," + y(v).toFixed(1) + " ";
+      started = true;
+    });
+    return d.trim();
+  }
+
+  const ySteps = 4;
+  let gridlines = "", yLabels = "";
+  for (let i = 0; i <= ySteps; i++) {
+    const v = yMin + (yMax - yMin) * (i / ySteps);
+    const py = y(v).toFixed(1);
+    gridlines += `<line x1="${padL}" y1="${py}" x2="${W - padR}" y2="${py}" class="chart-grid" />`;
+    yLabels += `<text x="${padL - 6}" y="${(y(v) + 4).toFixed(1)}" class="chart-axis-label" text-anchor="end">${Math.round(v)}&deg;</text>`;
+  }
+
+  let xLabels = "";
+  [0, 0.5, 1].forEach((f, i) => {
+    const t = t0 + tSpan * f;
+    const anchor = i === 0 ? "start" : i === 2 ? "end" : "middle";
+    xLabels += `<text x="${x(t).toFixed(1)}" y="${H - 6}" class="chart-axis-label" text-anchor="${anchor}">${fmtChartTime(t)}</text>`;
+  });
+
+  el.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="temp-chart">
+      ${gridlines}${yLabels}${xLabels}
+      <path d="${pathFor("zone1_temp")}" class="chart-line chart-line-zone1" fill="none" />
+      <path d="${pathFor("zone2_temp")}" class="chart-line chart-line-zone2" fill="none" />
+    </svg>
+    <div class="chart-legend">
+      <span class="chart-legend-item"><span class="chart-swatch chart-swatch-zone1"></span>Zone 1</span>
+      <span class="chart-legend-item"><span class="chart-swatch chart-swatch-zone2"></span>Zone 2</span>
+    </div>`;
+}
+
+async function fetchAndRenderChart() {
+  const base = apiBase();
+  const oven = selectedOven();
+  const mode = document.getElementById("chart-mode").value;
+  const label = document.getElementById("chart-range-label");
+
+  let url;
+  if (mode === "live") {
+    url = `${base}/api/oven/${oven}/history?hours=6`;
+    label.textContent = "";
+  } else {
+    const opt = document.getElementById("chart-mode").selectedOptions[0];
+    const start = opt.dataset.start, end = opt.dataset.end;
+    url = `${base}/api/oven/${oven}/history?start=${encodeURIComponent(start)}` +
+      (end ? `&end=${encodeURIComponent(end)}` : "") + "&limit=5000";
+    label.textContent = end
+      ? `${fmtChartTime(new Date(start).getTime())} – ${fmtChartTime(new Date(end).getTime())}`
+      : `from ${fmtChartTime(new Date(start).getTime())} (load still open)`;
+  }
+
+  try {
+    const resp = await fetch(url).then((r) => r.json());
+    renderTempChart(resp.samples || []);
+  } catch (e) {
+    document.getElementById("temp-chart-container").innerHTML =
+      '<div class="attention-detail">Could not load chart data.</div>';
+  }
+}
+
+async function loadChartPicker() {
+  const base = apiBase();
+  const oven = selectedOven();
+  const sel = document.getElementById("chart-mode");
+  try {
+    const resp = await fetch(`${base}/api/oven/${oven}/loads?limit=20`).then((r) => r.json());
+    const loads = (resp.loads || []).filter((l) => l.actual_start_time);
+    const options = ['<option value="live">Live &mdash; last 6h</option>'];
+    for (const l of loads) {
+      const partLabel = l.part_no ? ` – ${l.part_no}` : "";
+      const statusLabel = l.furnace_load_status ? ` (${l.furnace_load_status})` : "";
+      options.push(
+        `<option value="${l.furnace_load_no}" data-start="${l.actual_start_time}" ` +
+        `data-end="${l.actual_end_time || ""}">Load ${l.furnace_load_no}${partLabel}${statusLabel}</option>`);
+    }
+    sel.innerHTML = options.join("");
+  } catch (e) {
+    // Leave just "Live" - the picker is a nice-to-have, not required for
+    // the chart itself to work.
+  }
+}
+
+document.getElementById("chart-mode").addEventListener("change", fetchAndRenderChart);
+
 function renderJob(job, ovenState) {
   const el = document.getElementById("job-content");
   if (!job) {
@@ -437,6 +570,7 @@ async function refresh() {
     renderTags(cur);
     renderStates(st);
     renderJob(jobResp.load, (cur.sample || {}).state);
+    fetchAndRenderChart();  // independent of the main render; never blocks it
   } catch (err) {
     document.getElementById("last-updated").textContent = "API unreachable";
     const banner = document.getElementById("stale-banner");
@@ -465,5 +599,7 @@ for (const id of ["tag-filter", "only-flagged", "group-tags"]) {
 
 try { localStorage.setItem("ovenId", selectedOven()); } catch (e) { /* private mode */ }
 initOvenPicker();
+loadChartPicker();  // once - re-populating on every refresh tick would keep
+                    // resetting a selected historical load back to "Live"
 refresh();
 setInterval(refresh, REFRESH_MS);

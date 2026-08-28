@@ -106,8 +106,13 @@ def oven_current(oven_id):
 
 @app.route("/api/oven/<oven_id>/history")
 def oven_history(oven_id):
+    """?hours=N for the live chart (last N hours), or ?start=<iso>&end=<iso>
+    for reviewing a specific past load's absolute window - see store.history.
+    """
     hours = request.args.get("hours", default=6, type=float)
-    return jsonify({"samples": store.history(oven_id, hours=hours)})
+    start = request.args.get("start")
+    end = request.args.get("end")
+    return jsonify({"samples": store.history(oven_id, hours=hours, start=start, end=end)})
 
 
 @app.route("/api/oven/<oven_id>/states")
@@ -123,6 +128,13 @@ def oven_job(oven_id):
     rate are incompatible with calling it live on every request)."""
     load = store.current_plex_load(oven_id)
     return jsonify({"load": load})
+
+
+@app.route("/api/oven/<oven_id>/loads")
+def oven_loads(oven_id):
+    """Past Plex loads for the historical chart picker."""
+    limit = request.args.get("limit", default=30, type=int)
+    return jsonify({"loads": store.recent_loads(oven_id, limit=limit)})
 
 
 def serve(host="0.0.0.0", port=8000):
