@@ -125,9 +125,14 @@ def oven_states(oven_id):
 def oven_job(oven_id):
     """Current Plex job context, synced separately from PLC telemetry by
     plex_sync.py (see there for why - Plex latency and dashboard refresh
-    rate are incompatible with calling it live on every request)."""
-    load = store.current_plex_load(oven_id)
-    return jsonify({"load": load})
+    rate are incompatible with calling it live on every request).
+
+    A list, not a single object - almost always one item, but the dual-
+    program workaround (see collector/plex.py's get_current_loads()) can
+    leave two loads simultaneously Started for the same oven, and both
+    need to be shown."""
+    loads = store.current_plex_loads(oven_id)
+    return jsonify({"loads": loads})
 
 
 @app.route("/api/oven/<oven_id>/loads")

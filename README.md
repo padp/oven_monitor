@@ -347,7 +347,7 @@ measures 2-20s, and the dashboard polls every 5s) - so job context follows the s
 shape as PLC telemetry:
 
     collector/plex_sync.py  (poller host, every 120s)
-      -> get_current_load() per oven with a plex_workcenter_key
+      -> get_current_loads() per oven with a plex_workcenter_key
       -> get_container() on one of that load's serials for part/quantity
       -> db/oven_monitor.db: plex_loads table
     -> publisher.py forwards new plex_loads rows, same as samples/state_events
@@ -368,6 +368,24 @@ is a guess.
 Run `python run_plex_sync.py` as a third scheduled task alongside the collector and
 publisher (see "Running it for real" below) - same UNC-path and `--check`-first
 guidance applies.
+
+**Update 2026-08-28 - two loads can be simultaneously Started:** one Plex "program"
+is a deliberate workaround letting certain parts run under either of two program
+numbers interchangeably (`OperationCode` "Aging Prog #002 OR #018", the same string
+`_program_number()` already treats as ambiguous). Confirmed live on the small oven:
+Plex genuinely has TWO loads marked Started at once in that case (28650 "Aging Prog
+#018 340 10hr", 5 containers; 28651 "Aging Prog #002 OR #018", 2 containers) -
+picking just one, as `get_current_load()` used to, silently dropped a real load's
+parts. `collector/plex.py`'s `get_current_loads()` (plural) now returns every
+confirmed-Started load, not just the first; `plex_sync.py` inserts one `plex_loads`
+row per load, all sharing the exact same `ts` for that sync tick specifically so
+`api/store_*.py`'s `current_plex_loads()` can group them back together with an
+exact `ts` match (an inexact time-window match would be fragile against Plex's own
+multi-second-per-container latency). `publisher.py`'s `source_id` now includes
+`furnace_load_no` for this table, since two rows sharing one `ts` would otherwise
+collide on upsert and one would silently vanish server-side. `GET /job` now returns
+`{"loads": [...]}` (a list, almost always length 1) and the dashboard's job card
+renders one block per load, with a banner noting when there is more than one.
 
 ## Temperature trend charts - live and historical
 

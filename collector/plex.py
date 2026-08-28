@@ -123,7 +123,7 @@ def get_furnace_loads(workcenter_key, begin_date, end_date, active_only=True, st
       faster - measured live 2026-08-27 at 1.9s for 1 row vs. 19.9s for 140
       unfiltered rows over the same window - because Plex does the filtering
       itself rather than this returning everything for client-side filtering.
-      See get_current_load() for the confirmed-vs-guess pattern this exists
+      See get_current_loads() for the confirmed-vs-guess pattern this exists
       to support; most callers should use that rather than this directly.
 
     Returns the raw list of load records (each with CyclesData - temperature,
@@ -149,15 +149,25 @@ def get_furnace_loads(workcenter_key, begin_date, end_date, active_only=True, st
     return data if isinstance(data, list) else data.get("Data", {}).get("Rows", [])
 
 
-def get_current_load(workcenter_key, begin_date, end_date):
-    """Best answer to "what load is running in this oven right now?"
+def get_current_loads(workcenter_key, begin_date, end_date):
+    """Best answer to "what load(s) are running in this oven right now?"
+
+    Almost always exactly one. Confirmed live 2026-08-28: some Plex
+    "programs" are a deliberate workaround letting certain parts run under
+    either of two program numbers interchangeably (OperationCode "Aging
+    Prog #002 OR #018", the same string _program_number() already treats as
+    ambiguous) - Plex can have TWO loads simultaneously marked Started for
+    the same oven in that case, and both are genuinely current. Picking
+    just one (as this used to) silently drops real parts from the
+    dashboard, so every confirmed-Started load is returned.
 
     Two-tier lookup, in order:
 
     1. CONFIRMED: ask Plex directly for loads with FurnaceLoadStatusKey ==
-       STATUS_STARTED. If Plex has one, that is the operator having actually
-       toggled "Started" on this load - trust it outright, and this is also
-       the fast path (see the latency note on get_furnace_loads' status_key).
+       STATUS_STARTED. If Plex has any, that is the operator having
+       actually toggled "Started" on each of them - trust all of them
+       outright, and this is also the fast path (see the latency note on
+       get_furnace_loads' status_key).
 
     2. GUESS, if step 1 found nothing: the operator may simply not have
        marked anything Started yet even though a load is physically running.
@@ -172,15 +182,19 @@ def get_current_load(workcenter_key, begin_date, end_date):
        ActualStartTime. Among what remains, a load with no ActualEndTime yet
        is preferred (genuinely looks unfinished) over one with a real end
        time (definitely already over); within either group, the most
-       recently started one wins. This is still a guess, not a confirmation
-       - it is presented as one via the confirmed=False return value.
+       recently started one wins. Only ever a single best guess here, even
+       if the dual-program workaround is in play - guessing that BOTH of
+       its loads are simultaneously active with no operator confirmation at
+       all would compound one guess into two, not something to do
+       speculatively. This is still a guess, not a confirmation - it is
+       presented as one via the confirmed=False return value.
 
-    Returns (load_dict_or_None, confirmed: bool). (None, False) means neither
-    tier found anything - genuinely no load data in this window.
+    Returns (list_of_load_dicts, confirmed: bool). ([], False) means
+    neither tier found anything - genuinely no load data in this window.
     """
     started = get_furnace_loads(workcenter_key, begin_date, end_date, status_key=STATUS_STARTED)
     if started:
-        return started[0], True
+        return started, True
 
     all_loads = get_furnace_loads(workcenter_key, begin_date, end_date)
 
@@ -194,14 +208,14 @@ def get_current_load(workcenter_key, begin_date, end_date):
 
     candidates = [load for load in all_loads if _start_time(load)]
     if not candidates:
-        return None, False
+        return [], False
 
     # ISO 8601 UTC strings in a consistent format sort chronologically as
     # plain strings - no datetime parsing needed for "which is most recent."
     open_candidates = [load for load in candidates if _still_open(load)]
     pool = open_candidates or candidates
     best = max(pool, key=_start_time)
-    return best, False
+    return [best], False
 
 
 def get_container(serial_no, start_date, end_date, pcn=270494):

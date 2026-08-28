@@ -198,16 +198,7 @@ def states(oven_id, hours=24):
 PLEX_STALE_AFTER_S = 10 * 60
 
 
-def current_plex_load(oven_id):
-    """Latest Plex job-context lookup for one oven, or None if plex_sync.py
-    has never run (or never found a plex_workcenter_key configured) for it.
-    """
-    row = get_db().plex_loads.find_one(
-        {"oven_id": oven_id}, sort=[("ts", -1)], projection={"_id": False}
-    )
-    if row is None:
-        return None
-
+def _job_from_row(row):
     ts = _parse_ts(row.get("ts"))
     age = (datetime.now(timezone.utc) - ts).total_seconds() if ts else None
 
@@ -221,6 +212,30 @@ def current_plex_load(oven_id):
     out["stale"] = age is None or age > PLEX_STALE_AFTER_S
     out["age_s"] = age
     return out
+
+
+def current_plex_loads(oven_id):
+    """Every Plex load presently current for one oven - almost always one,
+    occasionally two (the dual-program workaround - see collector/plex.py's
+    get_current_loads() - can leave two loads simultaneously Started).
+
+    plex_sync.py gives every load found in the same sync tick the exact
+    same ts (see its sync_once()), so "everything from the latest tick" is
+    an exact ts match against the newest row, not a time-window guess. ts
+    is stored as the plain ISO string the collector produced (not a native
+    BSON date - see /ingest), so this is an ordinary string equality match.
+    Returns [] if plex_sync.py has never run (or never found a
+    plex_workcenter_key configured) for this oven.
+    """
+    latest = get_db().plex_loads.find_one(
+        {"oven_id": oven_id}, sort=[("ts", -1)], projection={"ts": True}
+    )
+    if latest is None:
+        return []
+    rows = get_db().plex_loads.find(
+        {"oven_id": oven_id, "ts": latest["ts"]}, projection={"_id": False}
+    ).sort("furnace_load_no", 1)
+    return [_job_from_row(row) for row in rows]
 
 
 def _value_type(value):

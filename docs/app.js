@@ -91,7 +91,7 @@ function groupFor(field) {
 
 /* --- actionable summary ---------------------------------------- */
 
-function buildAttention(data, states, job) {
+function buildAttention(data, states, jobs) {
   const items = [];
   const s = data.sample || {};
   const fields = new Map((data.fields || []).map((f) => [f.field, f.value]));
@@ -147,18 +147,24 @@ function buildAttention(data, states, job) {
     items.push({ sev: "warn", icon: "⚠", title: "Burner 2 fault bits set", detail: b2.join(", ") });
   }
 
-  // Cross-check the PLC's own recipe/program number against the one
-  // embedded in Plex's OperationCode. Both are independent sources for the
-  // same fact - a mismatch means something is actually wrong (the wrong
-  // recipe is loaded, or Plex is tracking the wrong load), not just a
-  // display quirk, so it is worth surfacing even though neither number is
-  // wrong to display on its own.
+  // Cross-check the PLC's own recipe/program number against the one(s)
+  // embedded in Plex's current load(s). Both are independent sources for
+  // the same fact - a mismatch means something is actually wrong (the
+  // wrong recipe is loaded, or Plex is tracking the wrong load), not just
+  // a display quirk. Usually one job; the dual-program workaround (see
+  // collector/plex.py's get_current_loads()) can make it two - flag only
+  // if the PLC's number matches NONE of them. A job with no parseable
+  // program_number (that same workaround's "#002 OR #018" case) is
+  // excluded rather than treated as a mismatch - there is nothing to
+  // compare it against.
   const plcProgram = fields.get("recipe_number");
-  const plexProgram = job && job.program_number;
-  if (plcProgram != null && plexProgram != null && Number(plcProgram) !== Number(plexProgram)) {
+  const knownJobs = (jobs || []).filter((j) => j.program_number != null);
+  if (plcProgram != null && knownJobs.length
+      && !knownJobs.some((j) => Number(j.program_number) === Number(plcProgram))) {
+    const seen = knownJobs.map((j) => `${j.program_number} (Load ${j.furnace_load_no})`).join(", ");
     items.push({ sev: "warn", icon: "⚠", title: "Program number mismatch",
-      detail: `PLC reports program ${plcProgram}, Plex's current load reports program ` +
-        `${plexProgram} (from "${job.operation_code}"). One of these is tracking the wrong recipe.` });
+      detail: `PLC reports program ${plcProgram}, but Plex's current load(s) report program ` +
+        `${seen}. One of these is tracking the wrong recipe.` });
   }
 
   if (!items.length) {
@@ -422,9 +428,10 @@ async function loadChartPicker() {
 
 document.getElementById("chart-mode").addEventListener("change", fetchAndRenderChart);
 
-function renderJob(job, ovenState) {
+function renderJob(jobs, ovenState) {
   const el = document.getElementById("job-content");
-  if (!job) {
+  jobs = jobs || [];
+  if (!jobs.length) {
     el.innerHTML = '<div class="attention-detail">No Plex data yet - plex_sync.py has not reported for this oven.</div>';
     return;
   }
@@ -432,12 +439,29 @@ function renderJob(job, ovenState) {
   // A load Plex itself has already closed out is not "current" in any
   // useful sense, confirmed or not - showing job details for it would
   // read as if something were still in the oven when nothing is.
-  if (job.furnace_load_status === "Completed") {
-    el.innerHTML = `<div class="attention-detail">No active job - the last known load ` +
-      `(Furnace Load ${job.furnace_load_no || "?"}) is already Completed.</div>`;
+  const active = jobs.filter((j) => j.furnace_load_status !== "Completed");
+  if (!active.length) {
+    const done = jobs.map((j) => j.furnace_load_no || "?").join(", ");
+    el.innerHTML = `<div class="attention-detail">No active job - the last known load(s) ` +
+      `(Furnace Load ${done}) are already Completed.</div>`;
     return;
   }
 
+  // Almost always one job. The dual-program workaround (see collector/
+  // plex.py's get_current_loads()) can leave two loads simultaneously
+  // Started for the same oven - both are real and both get shown, each
+  // in its own block, rather than picking one.
+  const note = active.length > 1
+    ? `<div class="banner" style="margin-bottom:0.6rem;">${active.length} loads are ` +
+      `simultaneously Started for this oven - likely the dual-program workaround ` +
+      `("${active[0].operation_code || "?"}"). All are shown below.</div>`
+    : "";
+  el.innerHTML = note + active.map((job) => renderOneJob(job, ovenState)).join(
+    '<hr style="margin: 1rem 0; border-color: var(--color-border);">'
+  );
+}
+
+function renderOneJob(job, ovenState) {
   let badge, badgeNote;
   if (job.confirmed) {
     badge = '<span class="flag ok">Plex-confirmed</span>';
@@ -471,7 +495,7 @@ function renderJob(job, ovenState) {
       <td class="value">${fmtNum(c.quantity, 0)}</td>
     </tr>`).join("");
 
-  el.innerHTML = `
+  return `
     <div class="status-row" style="margin-bottom: 0.75rem;">
       ${badge}
       <div style="font-weight: 700; font-size: 16px;">${part}</div>
@@ -564,12 +588,12 @@ async function refresh() {
     if (cur.error) throw new Error(cur.error);
     latest = cur;
     renderStatus(cur);
-    renderAttention(buildAttention(cur, st, jobResp.load));
+    renderAttention(buildAttention(cur, st, jobResp.loads));
     renderTiles(cur);
     renderProbes(cur);
     renderTags(cur);
     renderStates(st);
-    renderJob(jobResp.load, (cur.sample || {}).state);
+    renderJob(jobResp.loads, (cur.sample || {}).state);
     fetchAndRenderChart();  // independent of the main render; never blocks it
   } catch (err) {
     document.getElementById("last-updated").textContent = "API unreachable";

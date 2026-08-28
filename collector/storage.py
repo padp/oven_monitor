@@ -167,7 +167,7 @@ class Storage:
         """Record one Plex lookup result.
 
         `load` is the flattened dict collector/plex_sync.py builds from
-        get_current_load() + get_container() - see there for the shape.
+        get_current_loads() + get_container() - see there for the shape.
         Appended, like samples, rather than upserted in place: a history of
         what was running (or guessed to be running) over time is exactly
         the kind of thing worth keeping, and it costs nothing at this

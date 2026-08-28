@@ -46,8 +46,8 @@ def states(oven_id, hours=24):
     return _impl().states(oven_id, hours=hours)
 
 
-def current_plex_load(oven_id):
-    return _impl().current_plex_load(oven_id)
+def current_plex_loads(oven_id):
+    return _impl().current_plex_loads(oven_id)
 
 
 def recent_loads(oven_id, limit=30):

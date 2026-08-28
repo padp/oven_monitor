@@ -52,7 +52,7 @@ def _date_window(now):
     the user's own note alongside it): the begin date should be one day
     before "today" to reliably catch a cycle that started the previous day,
     since FurnaceLoad/Search's BeginDate/EndDate has not been confirmed to
-    filter strictly by real occurrence time (see get_current_load's
+    filter strictly by real occurrence time (see get_current_loads()'s
     docstring - an old, incompletely-logged record turned up in a 2-day
     window once already).
     """
@@ -157,18 +157,26 @@ def sync_once(storage, ovens):
             continue
         begin, end = _date_window(datetime.now(timezone.utc))
         try:
-            load, confirmed = plex.get_current_load(wc, begin, end)
+            loads, confirmed = plex.get_current_loads(wc, begin, end)
         except Exception as exc:
-            print("plex_sync: %s: get_current_load failed (will retry next cycle): %s"
+            print("plex_sync: %s: get_current_loads failed (will retry next cycle): %s"
                   % (oven["name"], exc))
             continue
-        if load is None:
+        if not loads:
             continue
-        flat = _flatten(load, confirmed)
-        storage.insert_plex_load(oven["id"], datetime.now(timezone.utc), flat)
-        print("plex_sync: %s -> load %s (%s) part=%s qty=%s" % (
-            oven["name"], flat["furnace_load_no"],
-            "confirmed" if confirmed else "guess", flat["part_no"], flat["quantity"]))
+        # One shared ts for every load found in this tick (not a fresh
+        # datetime.now() per insert) - the API's "what's current right now"
+        # query groups rows by exact ts match to recover which loads were
+        # seen together in the same sync round (see current_plex_loads()).
+        # Usually one row; the dual-program workaround (see
+        # get_current_loads()) can make it two.
+        ts = datetime.now(timezone.utc)
+        for load in loads:
+            flat = _flatten(load, confirmed)
+            storage.insert_plex_load(oven["id"], ts, flat)
+            print("plex_sync: %s -> load %s (%s) part=%s qty=%s" % (
+                oven["name"], flat["furnace_load_no"],
+                "confirmed" if confirmed else "guess", flat["part_no"], flat["quantity"]))
 
 
 def run():

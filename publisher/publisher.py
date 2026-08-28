@@ -38,6 +38,14 @@ MUTABLE_TABLES = {
 
 def _source_id(table_name, row):
     """A stable identity for a row, independent of local rowids."""
+    if table_name == "plex_loads":
+        # plex_sync.py can insert more than one row per oven with the SAME
+        # ts (the dual-program workaround - see get_current_loads() -
+        # occasionally has two loads Started at once, sync'd in the same
+        # tick on purpose so the API can group them back together). ts
+        # alone would collide and the ingest upsert would silently drop
+        # one; furnace_load_no disambiguates them.
+        return "%s:%s:%s" % (row["oven_id"], row["ts"], row["furnace_load_no"])
     spec = MUTABLE_TABLES.get(table_name)
     stamp = row[spec["start_column"]] if spec else row["ts"]
     return "%s:%s" % (row["oven_id"], stamp)

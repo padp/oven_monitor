@@ -262,21 +262,9 @@ def states(oven_id, hours=24):
 PLEX_STALE_AFTER_S = 10 * 60
 
 
-def current_plex_load(oven_id):
-    """Latest Plex job-context lookup for one oven, or None if plex_sync.py
-    has never run (or never found a plex_workcenter_key configured) for it.
-    """
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM plex_loads WHERE oven_id = ? ORDER BY id DESC LIMIT 1",
-            (oven_id,),
-        ).fetchone()
-    if row is None:
-        return None
-
+def _job_from_row(row):
     ts = _parse_ts(row["ts"])
     age = (datetime.now(timezone.utc) - ts).total_seconds() if ts else None
-
     return {
         "ts": row["ts"],
         "confirmed": bool(row["confirmed"]),
@@ -299,6 +287,31 @@ def current_plex_load(oven_id):
         "stale": age is None or age > PLEX_STALE_AFTER_S,
         "age_s": age,
     }
+
+
+def current_plex_loads(oven_id):
+    """Every Plex load presently current for one oven - almost always one,
+    occasionally two (the dual-program workaround - see collector/plex.py's
+    get_current_loads() - can leave two loads simultaneously Started).
+
+    plex_sync.py gives every load found in the same sync tick the exact
+    same ts (see its sync_once()), so "everything from the latest tick" is
+    an exact ts match against the newest row, not a time-window guess.
+    Returns [] if plex_sync.py has never run (or never found a
+    plex_workcenter_key configured) for this oven.
+    """
+    with _connect() as conn:
+        latest = conn.execute(
+            "SELECT ts FROM plex_loads WHERE oven_id = ? ORDER BY id DESC LIMIT 1",
+            (oven_id,),
+        ).fetchone()
+        if latest is None:
+            return []
+        rows = conn.execute(
+            "SELECT * FROM plex_loads WHERE oven_id = ? AND ts = ? ORDER BY furnace_load_no",
+            (oven_id, latest["ts"]),
+        ).fetchall()
+    return [_job_from_row(row) for row in rows]
 
 
 def _value_type(value):
