@@ -369,6 +369,44 @@ Run `python run_plex_sync.py` as a third scheduled task alongside the collector 
 publisher (see "Running it for real" below) - same UNC-path and `--check`-first
 guidance applies.
 
+## Temperature trend charts - live and historical
+
+Zone 1 / Zone 2 are "the two primary load thermocouples" (burner-associated), plotted
+as a hand-rolled SVG line chart in `docs/app.js` (`renderTempChart()`) - no external
+charting library, consistent with the rest of this dashboard's zero-dependency,
+no-CDN design. Theme-aware via the same CSS custom properties used everywhere else
+(`--color-accent`, `--note`, `--color-border`, `--color-text-muted`), so it needs no
+separate dark-mode handling.
+
+A `<select id="chart-mode">` picker defaults to "Live - last 6h" and otherwise lists
+past Plex loads for that oven (number, part, status) from a new
+`GET /api/oven/<id>/loads` endpoint, backed by `recent_loads()` in `api/store_*.py` -
+`plex_loads` gets a new sync row roughly every 2 minutes while a load is current, so
+this dedupes to one entry per `furnace_load_no`, keeping its **most recent** row
+(status can flip Started -> Completed between syncs; the picker should reflect that,
+not a stale first-seen status).
+
+Selecting a historical load re-fetches `/history` with that load's exact
+`actual_start_time`/`actual_end_time` instead of a relative window - `history()` now
+accepts an explicit `start`/`end` pair that overrides the `hours`-based cutoff
+entirely, since a days-old completed load can't be expressed as "the last N hours".
+The chart fetch is fire-and-forget off the end of the normal 5s refresh tick; the
+picker's own option list is populated once at page load only; re-populating it on
+every tick would reset a user's historical selection back to "Live" underneath them.
+
+Verified against a full real cycle (small oven, load 28644, 2026-08-27/28): ramp-up
+~100F -> ~365F, a soak/plateau with the expected step-transition wobble, then a clean
+cooldown - rendered correctly in both light and dark themes via Playwright, using a
+snapshot copy of the production database (see below).
+
+**Testing note - SQLite over SMB:** pointing a local test API straight at the live
+production database (the same UNC file the remote collector writes to) reproduces
+`sqlite3.OperationalError: database is locked` under any concurrent access - a known
+limitation of SQLite over an SMB share, not a code bug. For local testing, take a
+one-time snapshot copy of the db file instead of querying the live one directly. Not
+a production concern: the deployed API is Mongo-backed, and the collector's SQLite
+file is local disk, never shared with another process.
+
 ## Conventions
 
 - Local secrets live in `secret/*.txt` (gitignored), matching sibling projects.
