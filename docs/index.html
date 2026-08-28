@@ -28,13 +28,8 @@
     </section>
 
     <section class="card" id="job-card">
-      <h2>Current job <span class="footnote" style="text-transform:none; font-weight:400;">&mdash; from Plex</span></h2>
+      <h2>Current job</h2>
       <div id="job-content"></div>
-    </section>
-
-    <section class="card">
-      <h2>Needs attention</h2>
-      <div id="attention-list"></div>
     </section>
 
     <section class="card">
@@ -59,9 +54,9 @@
       <p class="footnote" id="probe-note"></p>
     </section>
 
-    <section class="card">
-      <h2>Tag monitor</h2>
-      <div class="table-tools">
+    <details class="card">
+      <summary><h2>Tag monitor</h2></summary>
+      <div class="table-tools" style="margin-top:0.85rem;">
         <input type="search" id="tag-filter" placeholder="Filter by field or PLC tag...">
         <label><input type="checkbox" id="only-flagged"> Only flagged</label>
         <label><input type="checkbox" id="group-tags" checked> Group</label>
@@ -80,28 +75,14 @@
         </table>
       </div>
       <p class="footnote">
-        Values in this table are shown exactly as the PLC reported them &mdash; no polarity
-        correction and no substituted defaults. Rows marked <span class="flag">polarity?</span>
-        are bits whose wiring is still unconfirmed (currently just <code>power_feed</code>), so a
-        <code>true</code> there does not yet mean what the tag name suggests. The door limit
-        switches (<code>entrance_door_down</code> / <code>exit_door_down</code>) were the same
-        kind of unconfirmed bit until 2026-08-27, when two independent real-world checks on
-        different days - doors physically open with the raw bit reading <code>true</code>, then
-        physically closed with it reading <code>false</code> - confirmed they are wired
-        normally-closed. That correction is applied only in the <strong>Doors</strong> tile above,
-        which shows the true CLOSED/OPEN state; the raw <code>*_door_down</code> fields here stay
-        unmodified. See <code>reference/oven_91_tag_map.md</code>.
+        Raw PLC readings, no polarity correction applied. <span class="flag">polarity?</span>
+        marks bits whose wiring is still unconfirmed.
       </p>
-    </section>
+    </details>
 
     <section class="card">
       <h2>Observed state, last 24h</h2>
       <div id="state-summary"></div>
-      <p class="footnote">
-        Share of <em>observed</em> time only &mdash; not an uptime figure. The collector has not
-        been running long enough, and the small oven has not been watched through a full cycle
-        yet, for a percentage to mean more than this.
-      </p>
     </section>
   </main>
 

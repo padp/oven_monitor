@@ -89,91 +89,6 @@ function groupFor(field) {
   return "Other";
 }
 
-/* --- actionable summary ---------------------------------------- */
-
-function buildAttention(data, states, jobs) {
-  const items = [];
-  const s = data.sample || {};
-  const fields = new Map((data.fields || []).map((f) => [f.field, f.value]));
-
-  if (!data.oven.enabled) {
-    items.push({ sev: "note", icon: "○", title: "This oven is not being polled",
-      detail: "It is configured but disabled in collector/config.py." });
-  }
-
-  if (data.stale) {
-    items.push({ sev: "warn", icon: "⚠", title: "Collector is not reporting",
-      detail: `Newest sample is ${fmtAge(data.age_s)}. Expected every ${data.poll_interval_s || 30}s. ` +
-              "Check that run_collector.py is running on the poller host." });
-  }
-
-  if (s.state === "FAULT") {
-    items.push({ sev: "warn", icon: "⚠", title: "Oven reporting FAULT", detail: s.reason || "" });
-  }
-
-  const probes = data.load_temps || [];
-  const bad = probes.filter((p) => !p.valid);
-  if (bad.length) {
-    items.push({ sev: "warn", icon: "⚠",
-      title: `${bad.length} of ${probes.length} load thermocouples reading invalid`,
-      detail: bad.map((p) => p.probe).join(", ") +
-        " — pinned at 2192°F, which is type J full scale (no signal). " +
-        "Excluded from the load temperature average." });
-  }
-
-  const suspect = (data.fields || []).filter((f) => f.polarity_unconfirmed);
-  if (suspect.length) {
-    items.push({ sev: "note", icon: "?", title: "Bit polarity still unconfirmed",
-      detail: suspect.map((f) => `${f.field}=${f.value}`).join(", ") +
-        " — these read as if wired normally-closed. Nothing depends on them yet; " +
-        "watching a real cycle will settle it." });
-  }
-
-  // The specific trap that produced a false FAULT on the first live poll.
-  if (fields.get("cycle_active") === false && typeof s.cycle_time_left_min === "number"
-      && s.cycle_time_left_min > 0) {
-    items.push({ sev: "note", icon: "ℹ",
-      title: "Time remaining is a setpoint, not a countdown",
-      detail: `cycle_time_left_min reads ${Math.round(s.cycle_time_left_min)} min but no cycle is ` +
-        "running. On this oven that tag holds the operator-entered load time until a cycle starts." });
-  }
-
-  // Burner 2 signals, surfaced together because individually they are easy to miss.
-  const b2 = [];
-  if (fields.get("burner2_flame_failure") === true) b2.push("flame failure fault");
-  if (fields.get("burner2_open_tc_fault") === true) b2.push("open thermocouple");
-  if (fields.get("burner2_high_temp_fault") === true) b2.push("high temperature fault");
-  if (b2.length) {
-    items.push({ sev: "warn", icon: "⚠", title: "Burner 2 fault bits set", detail: b2.join(", ") });
-  }
-
-  // Cross-check the PLC's own recipe/program number against the one(s)
-  // embedded in Plex's current load(s). Both are independent sources for
-  // the same fact - a mismatch means something is actually wrong (the
-  // wrong recipe is loaded, or Plex is tracking the wrong load), not just
-  // a display quirk. Usually one job; the dual-program workaround (see
-  // collector/plex.py's get_current_loads()) can make it two - flag only
-  // if the PLC's number matches NONE of them. A job with no parseable
-  // program_number (that same workaround's "#002 OR #018" case) is
-  // excluded rather than treated as a mismatch - there is nothing to
-  // compare it against.
-  const plcProgram = fields.get("recipe_number");
-  const knownJobs = (jobs || []).filter((j) => j.program_number != null);
-  if (plcProgram != null && knownJobs.length
-      && !knownJobs.some((j) => Number(j.program_number) === Number(plcProgram))) {
-    const seen = knownJobs.map((j) => `${j.program_number} (Load ${j.furnace_load_no})`).join(", ");
-    items.push({ sev: "warn", icon: "⚠", title: "Program number mismatch",
-      detail: `PLC reports program ${plcProgram}, but Plex's current load(s) report program ` +
-        `${seen}. One of these is tracking the wrong recipe.` });
-  }
-
-  if (!items.length) {
-    items.push({ sev: "ok", icon: "✓", title: "Nothing needs attention",
-      detail: "Collector reporting on schedule, no faults, all load probes valid." });
-  }
-  return items;
-}
-
 /* --- rendering -------------------------------------------------- */
 
 let latest = null;
@@ -184,8 +99,7 @@ function renderStatus(data) {
   const state = s.state || "UNKNOWN";
   badge.textContent = state;
   badge.className = "badge " + state;
-  document.getElementById("oven-name").textContent =
-    `${data.oven.name} — ${data.oven.ip}`;
+  document.getElementById("oven-name").textContent = data.oven.name;
   document.getElementById("status-reason").textContent = s.reason || "No data yet.";
 
   const banner = document.getElementById("stale-banner");
@@ -199,77 +113,58 @@ function renderStatus(data) {
     s.ts ? `updated ${fmtAge(data.age_s)}` : "no data";
 }
 
-function renderAttention(items) {
-  document.getElementById("attention-list").innerHTML = items.map((i) => `
-    <div class="attention-item sev-${i.sev}">
-      <span class="attention-icon">${i.icon}</span>
-      <div>
-        <div class="attention-title">${i.title}</div>
-        ${i.detail ? `<div class="attention-detail">${i.detail}</div>` : ""}
-      </div>
-    </div>`).join("");
-}
-
 function burnerTile(label, flameOn, pilotOn) {
   const value = flameOn === true ? "ON" : flameOn === false ? "OFF" : "&ndash;";
   const sub = flameOn === false && pilotOn === true ? "pilot lit" : "";
   return [label, value, sub];
 }
 
+// The large oven has no direct flame-on bit - only burner motor output
+// (zone1_burner/zone2_burner). Same threshold Detector._equipment_active()
+// already uses to decide RUNNING for that oven: nonzero means firing.
+function burnerOn(f, flameField, mtrField) {
+  const flame = f.get(flameField);
+  if (flame === true || flame === false) return flame;
+  const mtr = f.get(mtrField);
+  return typeof mtr === "number" ? mtr > 0 : null;
+}
+
 function doorsTile(s) {
   const e = s.entrance_door_closed, x = s.exit_door_closed;
   if (e === null || e === undefined || x === null || x === undefined) {
-    return ["Doors", "&ndash;", "polarity-corrected - see footnote below"];
+    return ["Doors", "&ndash;"];
   }
   if (e === x) {
-    return ["Doors", e ? "CLOSED" : "OPEN", "polarity-corrected - see footnote below"];
+    return ["Doors", e ? "CLOSED" : "OPEN"];
   }
-  return ["Doors", `entrance ${e ? "closed" : "open"}, exit ${x ? "closed" : "open"}`,
-    "polarity-corrected - see footnote below"];
+  return ["Doors", `entrance ${e ? "closed" : "open"}, exit ${x ? "closed" : "open"}`];
 }
 
 function renderTiles(data) {
   const s = data.sample || {};
   const f = new Map((data.fields || []).map((x) => [x.field, x.value]));
   const tiles = [
-    ["Zone 1", fmtNum(s.zone1_temp, 1, "°F"), `setpoint ${fmtNum(s.setpoint, 0, "°F")} - trust this one`],
-    // Zone 2's own setpoint tag is not what the oven actually controls to -
-    // confirmed 2026-08-27: Zone 2's real temperature tracks Zone 1's
-    // setpoint, not its own (which read 305°F while Zone 2 was actually
-    // sitting at 365°F, matching Zone 1's 365°F target). Showing Zone 2's
-    // setpoint here would just be showing a number nothing is following.
-    ["Zone 2", fmtNum(s.zone2_temp, 1, "°F"), "tracks Zone 1's setpoint, not its own"],
+    ["Zone 1", fmtNum(s.zone1_temp, 1, "°F"), `setpoint ${fmtNum(s.setpoint, 0, "°F")}`],
+    ["Zone 2", fmtNum(s.zone2_temp, 1, "°F")],
     ["Load temp", fmtNum(s.load_temp_mean, 1, "°F"),
       s.load_temp_valid_count
         ? `${fmtNum(s.load_temp_min, 0)}–${fmtNum(s.load_temp_max, 0)} across ${s.load_temp_valid_count} probes`
         : "no valid probes"],
-    // On/off, not the raw SCALED_CONTROL_VARIABLE - that tag is not a 0-100
-    // percentage (observed live at 599 and 1198, i.e. not %), and showing it
-    // as one was actively misleading. MAIN_FLAME_ON is a clean, direct bool.
-    // The raw number is still visible in the tag monitor table below.
-    burnerTile("Burner 1", f.get("burner1_flame_on"), f.get("burner1_pilot_on")),
-    burnerTile("Burner 2", f.get("burner2_flame_on"), f.get("burner2_pilot_on")),
-    ["Cycle", f.get("cycle_active") ? "RUNNING" : "not running",
+    burnerTile("Burner 1", burnerOn(f, "burner1_flame_on", "zone1_burner"), f.get("burner1_pilot_on")),
+    burnerTile("Burner 2", burnerOn(f, "burner2_flame_on", "zone2_burner"), f.get("burner2_pilot_on")),
+    // Mirrors the state badge above (Detector's actual RUNNING logic), not
+    // the raw cycle_active field - that field only exists on the small
+    // oven, so reading it directly always read "not running" on the large
+    // one regardless of the real state.
+    ["Cycle", s.state === "RUNNING" ? "RUNNING" : "not running",
       typeof s.cycle_time_left_min === "number"
         ? `load time ${(s.cycle_time_left_min / 60).toFixed(1)}h` : ""],
-    // Computed, not read from the PLC - HR_LOAD_TIME_LEFT_TO_MMI and
-    // friends were confirmed live to never actually count down. This is
-    // derived from the active recipe's target temp/ramp rate/soak time
-    // plus the live actual temperature, gated to RUNNING only (an idle,
-    // cooling oven's stale recipe fields would otherwise produce a
-    // meaningless number - see api/cycle_time.py).
     ["Time Remaining",
       typeof s.cycle_time_remaining_computed_min === "number"
-        ? fmtDuration(s.cycle_time_remaining_computed_min * 60) : "&ndash;",
-      "computed from the recipe, not a PLC countdown"],
-    ["Exhaust", fmtNum(s.exhaust_fan_active, 0, " Hz"), "VFD output frequency"],
+        ? fmtDuration(s.cycle_time_remaining_computed_min * 60) : "&ndash;"],
+    ["Exhaust", fmtNum(s.exhaust_fan_active, 0, " Hz")],
     doorsTile(s),
-    // From the PLC directly (RECIPE_NUMBER / Recipe_Number_Running) - cross-
-    // checked against Plex's own copy (embedded in OperationCode) in the
-    // "Needs attention" panel above, since they are two independent sources
-    // for the same fact and a mismatch would mean something is really wrong.
-    ["Program #", f.has("recipe_number") ? String(f.get("recipe_number")) : "&ndash;",
-      "from the PLC"],
+    ["Program #", f.has("recipe_number") ? String(f.get("recipe_number")) : "&ndash;"],
   ];
   document.getElementById("tile-grid").innerHTML = tiles.map(([label, value, sub]) => `
     <div class="tile">
@@ -462,20 +357,13 @@ function renderJob(jobs, ovenState) {
 }
 
 function renderOneJob(job, ovenState) {
-  let badge, badgeNote;
+  let badge;
   if (job.confirmed) {
     badge = '<span class="flag ok">Plex-confirmed</span>';
-    badgeNote = "the operator actually toggled \"Started\" on this load in Plex.";
   } else if (ovenState !== "RUNNING") {
     badge = '<span class="flag">Unconfirmed - staged for next load</span>';
-    badgeNote = "the oven is not currently RUNNING, so this load - not marked Started in " +
-      "Plex - most likely is not physically in the oven yet; it reads as queued/prepped " +
-      "for whenever it next runs.";
   } else {
     badge = '<span class="flag">unconfirmed guess</span>';
-    badgeNote = "the oven IS running but nothing is marked Started in Plex, so this is the " +
-      "most-recently-started load instead - it may genuinely be what's running, but the " +
-      "operator has not confirmed it in Plex.";
   }
   const staleNote = job.stale
     ? `<div class="banner" style="margin-top:0.6rem;">Plex data last refreshed ${fmtAge(job.age_s)} - showing the last known job.</div>`
@@ -505,7 +393,7 @@ function renderOneJob(job, ovenState) {
       <div class="tile"><div class="tile-label">Quantity</div><div class="tile-value">${fmtNum(job.quantity, 0)}</div></div>
       <div class="tile"><div class="tile-label">Furnace Load</div><div class="tile-value">${job.furnace_load_no || "&ndash;"}</div><div class="tile-sub">${job.furnace_load_status || ""}</div></div>
       <div class="tile"><div class="tile-label">Target Temp</div><div class="tile-value">${fmtNum(job.temperature, 0, "°F")}</div></div>
-      <div class="tile"><div class="tile-label">Program #</div><div class="tile-value">${job.program_number != null ? job.program_number : "&ndash;"}</div><div class="tile-sub">from Plex</div></div>
+      <div class="tile"><div class="tile-label">Program #</div><div class="tile-value">${job.program_number != null ? job.program_number : "&ndash;"}</div></div>
     </div>
     ${staleNote}
     ${containers.length > 1 ? `
@@ -514,8 +402,7 @@ function renderOneJob(job, ovenState) {
         <thead><tr><th>Serial No</th><th>Job No</th><th>Part No</th><th>Part Name</th><th>Qty</th></tr></thead>
         <tbody>${containerRows}</tbody>
       </table>
-    </div>` : ""}
-    <p class="footnote">${badge} &mdash; ${badgeNote}</p>`;
+    </div>` : ""}`;
 }
 
 function renderTags(data) {
@@ -588,7 +475,6 @@ async function refresh() {
     if (cur.error) throw new Error(cur.error);
     latest = cur;
     renderStatus(cur);
-    renderAttention(buildAttention(cur, st, jobResp.loads));
     renderTiles(cur);
     renderProbes(cur);
     renderTags(cur);

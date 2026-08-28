@@ -104,6 +104,10 @@ main { max-width: 1040px; margin: 0 auto; padding: 0 1.5rem; }
   color: var(--color-text-muted);
 }
 
+.card summary { cursor: pointer; }
+.card summary h2 { display: inline; margin: 0; }
+.card[open] summary h2 { margin-bottom: 0; }
+
 /* Status ------------------------------------------------------ */
 
 .status-row { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; }
@@ -136,32 +140,9 @@ main { max-width: 1040px; margin: 0 auto; padding: 0 1.5rem; }
 }
 .hidden { display: none; }
 
-/* Attention list ---------------------------------------------- */
+/* Generic muted inline message (chart/job/state "nothing to show yet" text) */
 
-.attention-item {
-  display: flex;
-  gap: 0.7rem;
-  align-items: flex-start;
-  padding: 0.6rem 0.75rem;
-  border-radius: 8px;
-  margin-bottom: 0.5rem;
-  font-size: 14px;
-  line-height: 1.45;
-  border: 1px solid var(--note-border);
-  background: var(--note-bg);
-}
-.attention-item:last-child { margin-bottom: 0; }
-.attention-item.sev-warn { border-color: var(--warn-border); background: var(--warn-bg); }
-.attention-item.sev-ok {
-  border-color: var(--color-border);
-  background: var(--color-surface-alt);
-  color: var(--color-text-muted);
-}
-.attention-icon { font-size: 15px; line-height: 1.4; }
-.attention-title { font-weight: 600; }
 .attention-detail { color: var(--color-text-muted); margin-top: 0.15rem; }
-.sev-warn .attention-title { color: var(--warn); }
-.sev-note .attention-title { color: var(--note); }
 
 /* Tiles -------------------------------------------------------- */
 
