@@ -149,6 +149,28 @@ directory set to the project root, triggered at startup (and/or on a "repeat
 indefinitely" schedule), with "if the task is already running, do not start a new
 instance" set so a slow-to-exit previous run is never doubled up.
 
+[`scheduled/`](scheduled/) automates exactly that: one `.cmd` wrapper per entry point
+(each handing python the script's **full UNC path**, and each setting `OVEN_DB_DIR`) plus
+`install_tasks.ps1` to register them. It mirrors the sibling
+`Vision System Database/scheduled/`, with `-Remove` to undo and a `--check` preflight
+that refuses to register anything that doesn't import cleanly.
+
+    powershell -ExecutionPolicy Bypass -File .\scheduled\install_tasks.ps1
+    powershell -ExecutionPolicy Bypass -File .\scheduled\install_tasks.ps1 -RunWhenLoggedOff
+
+**Logon type and trigger are a matched pair.** By default the tasks run
+`-LogonType Interactive` on an **at-logon** trigger - they run while someone is logged on
+to the collector host, no stored password. Pass `-RunWhenLoggedOff` to get
+`-LogonType Password` on an **at-startup** trigger instead, which survives a reboot with
+nobody logged on, at the cost of storing that account's password in the task (the script
+prompts; it is never written to the repo) and needing the "Log on as a batch job" right.
+
+Do **not** substitute `-LogonType S4U` - the other "run whether user is logged on or not"
+option, and the tempting one because it stores no password. S4U tokens carry no *network*
+credentials, and everything here launches from `\\file1\...`, so every task would fail to
+reach its own scripts. Given the UNC-path rule below, a stored password is the price of
+running logged off.
+
 Before wiring any of them up as a scheduled task, run its `--check` flag by hand once -
 imports everything, touches nothing, and prints what it resolved (DB path, enabled
 ovens, publisher credentials, or - for plex_sync - which ovens have a
