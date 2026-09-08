@@ -12,6 +12,7 @@
   --color-text-muted: #5b6675;
   --color-accent: #2563eb;
   --color-accent-dark: #1d4ed8;
+  --color-accent-soft: #e6eefe;
   --radius: 10px;
   --shadow: 0 1px 3px rgba(15, 23, 42, 0.1), 0 1px 2px rgba(15, 23, 42, 0.06);
 
@@ -41,6 +42,7 @@
     --color-text-muted: #9aa0a6;
     --color-accent: #3b82f6;
     --color-accent-dark: #2563eb;
+    --color-accent-soft: #1e2c4d;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
 
     --warn: #f87171;
@@ -309,4 +311,227 @@ td.value { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
   main { padding: 0 0.9rem; }
   .app-header { padding: 14px 16px; }
   .tile-value { font-size: 20px; }
+}
+
+/* ------------------------------------------------------------ */
+/* Alerts page                                                    */
+/* ------------------------------------------------------------ */
+/* Ported from granco_monitor's docs/style.css (itself ported from picos'
+   AlertsView) - same class names, restated against this file's own
+   tokens. Buttons/forms didn't exist in this stylesheet before this page
+   needed them - this dashboard was read-only until now. */
+
+.btn {
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.5rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+.btn-primary { background: var(--color-accent); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--color-accent-dark); }
+
+.btn-secondary { background: var(--color-accent-soft); color: var(--color-accent-dark); }
+.btn-secondary:hover:not(:disabled) { background: var(--color-border); }
+
+.btn-link { background: none; color: var(--color-accent); padding: 0; font-weight: 500; text-decoration: underline; }
+
+.preset-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.trigger-builder {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 15px 20px;
+  margin: 10px 0;
+}
+
+.trigger-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 15px;
+}
+
+.trigger-form-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.trigger-form-row .trigger-field-label {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+
+.trigger-form-row input,
+.trigger-form-row select {
+  text-transform: none;
+  font-size: 15px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.trigger-form-row .duration-input {
+  display: flex;
+  gap: 6px;
+}
+
+.trigger-form-row .duration-input input {
+  width: 70px;
+}
+
+.condition-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.condition-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.condition-row select,
+.condition-row input {
+  font-size: 15px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.condition-row select:first-child {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+
+.condition-row input[type="number"],
+.condition-row input[type="text"] {
+  width: 150px;
+}
+
+.and-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  letter-spacing: 0.5px;
+  width: 34px;
+  flex: 0 0 auto;
+}
+
+.condition-remove {
+  padding: 6px 10px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.add-condition-button {
+  padding: 8px 12px;
+  font-size: 16px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.trigger-list {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+}
+
+.trigger-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  background: var(--color-accent-soft);
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin-bottom: 6px;
+}
+
+.trigger-list-item button {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.test-result {
+  font-size: 14px;
+  font-weight: 600;
+  flex-basis: 100%;
+}
+
+.test-result.test-ok { color: var(--running); }
+.test-result.test-error { color: var(--warn); }
+
+.alert-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 12px 18px;
+  margin-bottom: 12px;
+}
+
+.alert-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.alert-card-header > div:last-child {
+  display: flex;
+  gap: 8px;
+}
+
+.alert-card-header button {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--color-accent-soft);
+  border-top-color: var(--color-accent-dark);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.btn-primary .spinner {
+  border-color: rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
 }

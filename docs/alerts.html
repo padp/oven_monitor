@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oven Monitor - Alerts</title>
+  <link rel="icon" type="image/png" href="uacj-icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <span class="app-header-title">Oven Monitor - Alerts</span>
+    <div class="app-header-meta">
+      <span id="oven-picker-wrap" class="app-header-subtitle"></span>
+      <a class="app-header-subtitle" style="color:#fff;" href="index.html">&larr; Dashboard</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <p class="footnote" style="margin-top:0;">
+        Build a set of conditions on any live tag for the selected oven, then create an alert
+        that messages a recipient on Microsoft Teams the moment any of its triggers trip. A
+        recurring alert stays quiet until a trigger clears and trips again; a one-time alert
+        is removed automatically right after it fires once.
+      </p>
+
+      <h2 style="margin-top:0;">New Alert</h2>
+      <div id="preset-buttons" class="preset-buttons"></div>
+
+      <div id="trigger-builder" class="trigger-builder">
+        <div id="condition-rows"></div>
+        <div class="trigger-form-row">
+          <label>
+            Hold for at least
+            <span class="duration-input">
+              <input type="number" min="0" id="duration-value" placeholder="0">
+              <select id="duration-unit">
+                <option value="1">sec</option>
+                <option value="60">min</option>
+              </select>
+            </span>
+          </label>
+          <button type="button" id="add-trigger-btn" class="btn btn-secondary">+ Add Trigger</button>
+        </div>
+      </div>
+
+      <ul id="staging-list" class="trigger-list"></ul>
+
+      <div class="trigger-form-row">
+        <label class="trigger-field-label">
+          Recipient email
+          <input type="text" id="recipient-email" placeholder="someone@uwh.uacj-group.com">
+        </label>
+        <button type="button" id="send-test-btn" class="btn btn-secondary">Send Test</button>
+        <span id="test-result" class="test-result"></span>
+      </div>
+
+      <div class="trigger-form-row">
+        <label class="trigger-field-label">
+          Alert name (optional)
+          <input type="text" id="alert-label" placeholder="e.g. Overnight watch">
+        </label>
+        <label>
+          Repeat
+          <select id="repeat-select">
+            <option value="recurring">Recurring</option>
+            <option value="one_time">One-time (removed after it fires)</option>
+          </select>
+        </label>
+        <button type="button" id="create-alert-btn" class="btn btn-primary">Create Alert</button>
+      </div>
+      <p id="create-hint" class="footnote"></p>
+    </section>
+
+    <section class="card">
+      <h2>Existing Alerts</h2>
+      <div id="existing-alerts"></div>
+    </section>
+  </main>
+
+  <script src="alerts.js"></script>
+</body>
+</html>

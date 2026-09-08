@@ -10,11 +10,15 @@ publishes yet. Adding one later does not change any endpoint below.
 """
 import os
 
+from bson import ObjectId
+from bson.errors import InvalidId
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
+from collector import config as collector_config
+
 try:
-    from . import store
+    from . import alerts, store
 except ImportError:
     # Same trap as collector/collector.py: running this file directly makes
     # the relative import fail with a message that does not say why.
@@ -42,6 +46,15 @@ if os.environ.get("SQL_PASS"):
     # `python run_api.py`.
     from .db import ensure_indexes
     ensure_indexes()
+    if not os.environ.get("POLL_DISABLED"):
+        # This repo's first in-process background thread - everything else
+        # long-running here (collector, publisher, plex_sync) is a separate
+        # OS process (NSSM/Scheduled Tasks), which can't evaluate alert
+        # rules against a document living in this process's own Mongo
+        # connection. Same POLL_DISABLED escape hatch picos/granco_monitor
+        # use, for a local dev instance that shouldn't fire real Teams
+        # messages while someone's just poking at the API by hand.
+        alerts.start_background_alert_poller()
 
 
 def _require_api_key():
@@ -140,6 +153,131 @@ def oven_loads(oven_id):
     """Past Plex loads for the historical chart picker."""
     limit = request.args.get("limit", default=30, type=int)
     return jsonify({"loads": store.recent_loads(oven_id, limit=limit)})
+
+
+def _serialize_alert_rule(rule):
+    rule["_id"] = str(rule["_id"])
+    rule["webhook_url_masked"] = alerts.mask_webhook_url(rule.pop("webhook_url", None))
+    for trigger in rule.get("triggers", []):
+        trigger["description"] = alerts.describe_trigger(trigger)
+    return rule
+
+
+@app.get("/api/oven/<oven_id>/alerts/tags")
+def oven_alerts_tags(oven_id):
+    """Everything the trigger builder needs for one oven: every tag it can
+    be built against (bool/numeric/string - see alerts.list_available_tags)
+    plus the comparator/bool-mode wording and repeat-mode options."""
+    err = alerts.validate_oven_id(oven_id)
+    if err:
+        return jsonify(error=err), 404
+    return jsonify(
+        tags=alerts.list_available_tags(oven_id),
+        comparators=alerts.comparator_options(),
+        bool_modes=alerts.bool_mode_options(),
+        repeat_modes=list(alerts.REPEAT_MODES),
+        has_default_webhook=bool(alerts.default_webhook_url()),
+        recipient_email_domain=alerts.ALLOWED_RECIPIENT_DOMAIN,
+    )
+
+
+@app.get("/api/oven/<oven_id>/alerts")
+def oven_alerts_list(oven_id):
+    err = alerts.validate_oven_id(oven_id)
+    if err:
+        return jsonify(error=err), 404
+    from .db import get_db
+    db = get_db()
+    rules = list(db.alert_rules.find({"oven_id": oven_id}, sort=[("created_at", -1)]))
+    return jsonify(alerts=[_serialize_alert_rule(r) for r in rules])
+
+
+@app.post("/api/oven/<oven_id>/alerts/describe")
+def oven_alerts_describe(oven_id):
+    """Read-only preview: validates a draft trigger and returns its
+    human-readable description, without creating anything - see
+    granco_monitor's identical route (this one doesn't need oven_id at
+    all beyond the URL, since describe_draft_trigger has no oven-specific
+    behavior - kept oven-scoped in the URL anyway for consistency with
+    every other route here)."""
+    payload = request.get_json(force=True, silent=True) or {}
+    description, err = alerts.describe_draft_trigger(payload.get("trigger"))
+    if err:
+        return jsonify(error=err), 400
+    return jsonify(description=description)
+
+
+@app.post("/api/oven/<oven_id>/alerts/test-webhook")
+def oven_alerts_test_webhook(oven_id):
+    payload = request.get_json(force=True, silent=True) or {}
+    webhook_url = payload.get("webhook_url")
+    err = alerts.validate_webhook_url(webhook_url)
+    if err:
+        return jsonify(error=err), 400
+    webhook_url = webhook_url or alerts.default_webhook_url()
+    recipient_email = payload.get("recipient_email")
+    err = alerts.validate_recipient_email(recipient_email)
+    if err:
+        return jsonify(error=err), 400
+    oven_name = collector_config.OVENS.get(oven_id, {}).get("name", oven_id)
+    ok, status, body = alerts.send_teams(
+        webhook_url,
+        f"{oven_name} - Test Alert",
+        "This is a test message from the Oven Monitor Alerts page.",
+        recipient_email=recipient_email,
+    )
+    if not ok:
+        return jsonify(error=f"Teams rejected the request (status {status}): {body[:300]}"), 400
+    return jsonify(ok=True)
+
+
+@app.post("/api/oven/<oven_id>/alerts")
+def oven_alerts_create(oven_id):
+    """Creates a new alert scoped to this oven. No auth - matching this
+    repo's own existing posture (only /ingest is gated by an API key;
+    there's no account system here at all, unlike granco_monitor)."""
+    payload = request.get_json(force=True, silent=True) or {}
+    doc, err = alerts.build_rule_doc(oven_id, payload)
+    if err:
+        return jsonify(error=err), 400
+    from .db import get_db
+    db = get_db()
+    result = db.alert_rules.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return jsonify(_serialize_alert_rule(doc)), 201
+
+
+@app.patch("/api/oven/<oven_id>/alerts/<rule_id>")
+def oven_alerts_update(oven_id, rule_id):
+    """Only toggles active - editing triggers or the webhook URL goes
+    through delete + re-create instead."""
+    payload = request.get_json(force=True, silent=True) or {}
+    if not isinstance(payload.get("active"), bool):
+        return jsonify(error="active must be true/false"), 400
+    from .db import get_db
+    db = get_db()
+    try:
+        oid = ObjectId(rule_id)
+    except InvalidId:
+        return jsonify(error="invalid id"), 400
+    result = db.alert_rules.update_one({"_id": oid, "oven_id": oven_id}, {"$set": {"active": payload["active"]}})
+    if result.matched_count == 0:
+        return jsonify(error="not found"), 404
+    return jsonify(ok=True)
+
+
+@app.delete("/api/oven/<oven_id>/alerts/<rule_id>")
+def oven_alerts_delete(oven_id, rule_id):
+    from .db import get_db
+    db = get_db()
+    try:
+        oid = ObjectId(rule_id)
+    except InvalidId:
+        return jsonify(error="invalid id"), 400
+    result = db.alert_rules.delete_one({"_id": oid, "oven_id": oven_id})
+    if result.deleted_count == 0:
+        return jsonify(error="not found"), 404
+    return jsonify(ok=True)
 
 
 def serve(host="0.0.0.0", port=8000):
