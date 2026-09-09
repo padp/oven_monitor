@@ -170,6 +170,16 @@ main { max-width: 1040px; margin: 0 auto; padding: 0 1.5rem; }
 .tile-value { font-size: 24px; font-weight: 700; margin-top: 0.2rem; }
 .tile-sub { font-size: 12px; color: var(--color-text-muted); margin-top: 0.1rem; }
 
+.mode-toggle { font-size: 11px; margin-top: 0.1rem; display: inline-flex; gap: 0.5rem; }
+.mode-toggle a {
+  color: var(--color-text-muted);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.mode-toggle a:hover { color: var(--color-accent); }
+.mode-toggle a.active { color: var(--color-accent); font-weight: 700; }
+
 /* Probe grid --------------------------------------------------- */
 
 .probe-grid {

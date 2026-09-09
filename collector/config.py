@@ -58,6 +58,40 @@ LARGE_OVEN_TAGS = {
     "z2_safeguard_relay": "z2_safeguard_relay",
     "EXHAUST_FAN": "exhaust_fan_active",
     "POWER_FEED": "power_feed",
+    # Per-step recipe data, for computing full-cycle time remaining (current
+    # step + every step still ahead) rather than just the current step alone
+    # (CYCLE_TOTAL_MINUTES_LEFT above is confirmed step-scoped, not cycle-
+    # wide - see api/cycle_time.py). STEPS_SELECTD is how many of S1-S4 are
+    # actually part of the loaded recipe; confirmed live 2026-09-09 (a
+    # 1-step recipe: STEPS_SELECTD=1, S1_CYC_TEMP_SPT=365 exactly matching
+    # the live OVEN_TEMP_SETPOINT, S2-S4 reading temp=120/time=0/ramp=0 -
+    # the PLC's own "not part of this recipe" zero-state, not stale garbage).
+    # _CYC_..._SPT (not the _SPT_MIN sibling, which reads a nonzero default
+    # even for unused steps - almost certainly a configured MINIMUM limit,
+    # not "minutes", given S2-S4 showed RAMP_SPT=0 vs RAMP_SPT_MIN=10 at the
+    # same time) is the field that actually reads 0 for a step not in use.
+    "STEPS_SELECTD": "recipe_step_count",
+    "S1_CYC_TEMP_SPT": "recipe_step0_temp",
+    "S1_CYC_RAMP_SPT": "recipe_step0_ramp_rate",
+    "S1_CYC_TIME_SPT": "recipe_step0_soak_hr",
+    "S2_CYC_TEMP_SPT": "recipe_step1_temp",
+    "S2_CYC_RAMP_SPT": "recipe_step1_ramp_rate",
+    "S2_CYC_TIME_SPT": "recipe_step1_soak_hr",
+    "S3_CYC_TEMP_SPT": "recipe_step2_temp",
+    "S3_CYC_RAMP_SPT": "recipe_step2_ramp_rate",
+    "S3_CYC_TIME_SPT": "recipe_step2_soak_hr",
+    "S4_CYC_TEMP_SPT": "recipe_step3_temp",
+    "S4_CYC_RAMP_SPT": "recipe_step3_ramp_rate",
+    "S4_CYC_TIME_SPT": "recipe_step3_soak_hr",
+}
+
+# S{n}_CYC_TIME_SPT reads in minutes; recipe_step{i}_soak_hr matches the
+# small oven's canonical field name/units (hours) - see cycle_time.py.
+LARGE_OVEN_SCALES = {
+    "recipe_step0_soak_hr": 1 / 60.0,
+    "recipe_step1_soak_hr": 1 / 60.0,
+    "recipe_step2_soak_hr": 1 / 60.0,
+    "recipe_step3_soak_hr": 1 / 60.0,
 }
 
 # --- Small oven (10.4.20.91) ------------------------------------------
@@ -288,7 +322,7 @@ OVENS = {
         "enabled": True,
         "tags": LARGE_OVEN_TAGS,
         "load_tc_tags": [],
-        "scales": {},
+        "scales": LARGE_OVEN_SCALES,
         # None: fall back to cycle_time_left_min > 0, which is what
         # large_oven_status.py has always used and what replaying 691,366
         # historical snapshots through this detector reproduces exactly.

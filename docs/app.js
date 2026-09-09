@@ -150,9 +150,31 @@ function doorsTile(s) {
   return ["Doors", `entrance ${e ? "closed" : "open"}, exit ${x ? "closed" : "open"}`];
 }
 
+// Persisted per-viewer, not per-oven - "which do I want to see" is a
+// dashboard-viewing preference, not a fact about either oven. Defaults to
+// cycle (current step + everything still ahead), matching what the small
+// oven's tile already showed before this toggle existed; the large oven's
+// native field is step-only (confirmed live 2026-09-09 - CYCLE_TOTAL_MINUTES_LEFT
+// resets per step, not per cycle), so "Cycle" is now computed for it too via
+// api/cycle_time.py rather than read directly.
+let timeRemainingMode = (function () {
+  try { return localStorage.getItem("timeRemainingMode") || "cycle"; } catch (e) { return "cycle"; }
+})();
+
+function setTimeRemainingMode(mode) {
+  timeRemainingMode = mode;
+  try { localStorage.setItem("timeRemainingMode", mode); } catch (e) { /* private mode */ }
+  if (latest) renderTiles(latest);
+}
+
 function renderTiles(data) {
   const s = data.sample || {};
   const f = new Map((data.fields || []).map((x) => [x.field, x.value]));
+  const remainingMin = timeRemainingMode === "step" ? s.step_time_remaining_min : s.cycle_time_remaining_computed_min;
+  const remainingToggle = `<span class="mode-toggle">
+    <a href="#" class="${timeRemainingMode === "cycle" ? "active" : ""}" onclick="setTimeRemainingMode('cycle'); return false;">cycle</a>
+    <a href="#" class="${timeRemainingMode === "step" ? "active" : ""}" onclick="setTimeRemainingMode('step'); return false;">step</a>
+  </span>`;
   const tiles = [
     ["Zone 1", fmtNum(s.zone1_temp, 1, "°F"), `setpoint ${fmtNum(s.setpoint, 0, "°F")}`],
     ["Zone 2", fmtNum(s.zone2_temp, 1, "°F")],
@@ -170,8 +192,8 @@ function renderTiles(data) {
       typeof s.cycle_time_left_min === "number"
         ? `load time ${(s.cycle_time_left_min / 60).toFixed(1)}h` : ""],
     ["Time Remaining",
-      typeof s.cycle_time_remaining_computed_min === "number"
-        ? fmtDuration(s.cycle_time_remaining_computed_min * 60) : "&ndash;"],
+      typeof remainingMin === "number" ? fmtDuration(remainingMin * 60) : "&ndash;",
+      remainingToggle],
     purgeTile(f.get("burner1_purging")),
     doorsTile(s),
     ["Program #", f.has("recipe_number") ? String(f.get("recipe_number")) : "&ndash;"],

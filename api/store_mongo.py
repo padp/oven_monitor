@@ -93,6 +93,8 @@ def current(oven_id):
 
     ts = _parse_ts(row["ts"])
     age = (datetime.now(timezone.utc) - ts).total_seconds() if ts else None
+    step_remaining_min, cycle_remaining_min = _best_remaining_min(
+        oven, row, snapshot, oven_id, datetime.now(timezone.utc))
 
     return {
         "oven": oven_meta,
@@ -104,8 +106,8 @@ def current(oven_id):
                 "load_temp_max", "load_temp_valid_count")},
             "entrance_door_closed": _door_closed(snapshot, "entrance"),
             "exit_door_closed": _door_closed(snapshot, "exit"),
-            "cycle_time_remaining_computed_min": _best_remaining_min(
-                oven, row, snapshot, oven_id, datetime.now(timezone.utc)),
+            "step_time_remaining_min": step_remaining_min,
+            "cycle_time_remaining_computed_min": cycle_remaining_min,
         },
         "stale": age is None or age > STALE_AFTER_S,
         "age_s": age,
@@ -263,15 +265,10 @@ def _door_closed(snapshot, side):
 
 
 def _best_remaining_min(oven, row, snapshot, oven_id, now):
-    """The best available "time remaining" for this oven - see the identical
-    function in store_sqlite.py for the full reasoning (large oven's native
-    countdown is trusted directly; small oven uses the recipe-based
-    calculation instead).
-    """
-    if oven.get("cycle_time_left_min_trusted"):
-        return row.get("cycle_time_left_min") if row.get("state") == "RUNNING" else None
-    return cycle_time.compute_remaining_min(
-        snapshot, row.get("state"), _current_step_anchor(oven_id, snapshot.get("current_step")), now)
+    """(step_remaining_min, cycle_remaining_min) for this oven - see
+    api/cycle_time.py's module docstring for the full explanation."""
+    return cycle_time.compute_remaining(
+        snapshot, oven, row.get("state"), _current_step_anchor(oven_id, snapshot.get("current_step")), now)
 
 
 def _current_step_anchor(oven_id, current_step):

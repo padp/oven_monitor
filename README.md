@@ -337,6 +337,42 @@ cycle cooling down. Verified live (immediately reads `RUNNING` again) and replay
 against all 697,592 historical large-oven snapshots with zero regression (that oven
 has no `cycle_active_field`, so it takes the original, unchanged code path).
 
+**Update 2026-09-09 - the large oven's native field turned out to be step-scoped,
+not cycle-wide.** The "large oven doesn't need any of this" conclusion above was
+half right: `CYCLE_TOTAL_MINUTES_LEFT` genuinely counts down, but only within the
+*current step* - confirmed live by checking `CYCLE_HOURS_LEFT`/`CYCLE_MINUTES_LEFT`
+(the same value split into hours/minutes for display) and `CYC_HR_LEFT_IN_MINUTES`
+(just `CYCLE_HOURS_LEFT * 60`) - none of them are an independent cycle-wide figure,
+so a multi-step recipe's true remaining time (current step + everything still ahead)
+was never actually available before this. The dashboard now shows both, with a
+`cycle`/`step` toggle on the Time Remaining tile (persisted per-viewer in
+localStorage, defaulting to `cycle`).
+
+The large oven's own per-step recipe parameters - previously dismissed as "suspicious
+defaults" - turned out to be completely reliable once actually read during a real
+cycle: `S{1-4}_CYC_TEMP_SPT` / `_CYC_RAMP_SPT` / `_CYC_TIME_SPT` (temp °F, seconds
+per degree F, minutes - not the `_SPT_MIN` sibling fields, which read a nonzero
+default even for unused steps and are almost certainly a configured *minimum limit*,
+not "minutes") matched the live setpoint and Plex exactly, and `STEPS_SELECTD` gives
+the real step count, reading `0` cleanly for the temp/time/ramp of any step beyond
+that count rather than stale garbage. The only genuine gap: the large oven exposes no
+"current step index" tag at all (confirmed live - nothing named ACTIVE/CURRENT
+exists), so `api/cycle_time.py` infers it by matching the live setpoint against each
+step's own target temperature, returning `None` rather than guessing if that's ever
+ambiguous (two steps sharing a target temperature, which this data has no way to
+disambiguate).
+
+`api/cycle_time.py`'s `compute_remaining_min()` became `compute_remaining()`,
+returning `(step_remaining_min, cycle_remaining_min)` for both ovens uniformly: each
+oven gets its own best method for `step_remaining_min` (trusted native field for the
+large oven, recipe-computed-from-scratch for the small oven, unchanged), then both
+share identical logic for summing every step still ahead. Verified against the real
+running cycle live (1-step recipe: step and cycle correctly equal, 313 min both) and
+against a synthetic 2-step case (step=50min from the trusted native field, cycle=
+437.5min = 50 + full ramp/soak of the step ahead) - a real multi-step cycle to
+validate this end-to-end has not yet been observed, since every live check so far
+has caught this oven running a 1-step recipe.
+
 ## Plex integration - job context on the dashboard
 
 `collector/plex_login.py` + `collector/plex.py` are a reusable client for pulling real
